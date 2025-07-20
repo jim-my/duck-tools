@@ -1,0 +1,224 @@
+/**
+ * DuckDB-WASM Manager
+ * Handles database initialization, CSV loading, and query execution
+ */
+class DuckDBManager {
+    constructor() {
+        this.db = null;
+        this.conn = null;
+        this.isInitialized = false;
+    }
+    
+    /**
+     * Initialize DuckDB-WASM
+     * @returns {Promise<boolean>} Success status
+     */
+    async initialize() {
+        try {
+            console.log('Initializing DuckDB-WASM...');
+            
+            // Get the DuckDB bundle
+            const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+            const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+            
+            // Create worker and logger
+            const worker = new Worker(bundle.mainWorker);
+            const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
+            
+            // Initialize database
+            this.db = new duckdb.AsyncDuckDB(logger, worker);
+            await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+            
+            // Open connection
+            this.conn = await this.db.connect();
+            
+            this.isInitialized = true;
+            console.log('DuckDB-WASM initialized successfully');
+            return true;
+            
+        } catch (error) {
+            console.error('Failed to initialize DuckDB-WASM:', error);
+            throw new Error(`DuckDB initialization failed: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Load CSV file into DuckDB table
+     * @param {File} file - CSV file object
+     * @param {string} tableName - Name for the table
+     * @returns {Promise<string>} Table name
+     */
+    async loadCSV(file, tableName) {
+        if (!this.isInitialized) {
+            throw new Error('DuckDB not initialized');
+        }
+        
+        try {
+            console.log(`Loading CSV file: ${file.name} as table: ${tableName}`);
+            
+            // Read file content
+            const fileContent = await file.text();
+            
+            // Register the CSV content with DuckDB
+            await this.db.registerFileText(file.name, fileContent);
+            
+            // Create table from CSV using DuckDB's read_csv_auto function
+            const createTableQuery = `CREATE TABLE ${tableName} AS SELECT * FROM read_csv_auto('${file.name}')`;
+            await this.conn.query(createTableQuery);
+            
+            console.log(`Successfully loaded ${tableName}`);
+            return tableName;
+            
+        } catch (error) {
+            console.error(`Failed to load CSV file ${file.name}:`, error);
+            throw new Error(`Failed to load CSV: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Execute SQL query
+     * @param {string} sql - SQL query string
+     * @returns {Promise<Array>} Query results as array of objects
+     */
+    async runQuery(sql) {
+        if (!this.isInitialized) {
+            throw new Error('DuckDB not initialized');
+        }
+        
+        try {
+            console.log(`Executing query: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
+            
+            const result = await this.conn.query(sql);
+            const resultArray = result.toArray();
+            
+            console.log(`Query returned ${resultArray.length} rows`);
+            return resultArray;
+            
+        } catch (error) {
+            console.error('Query execution failed:', error);
+            throw new Error(`SQL Error: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Get table schema information
+     * @param {string} tableName - Name of the table
+     * @returns {Promise<Array>} Schema information
+     */
+    async getTableInfo(tableName) {
+        if (!this.isInitialized) {
+            throw new Error('DuckDB not initialized');
+        }
+        
+        try {
+            const result = await this.conn.query(`DESCRIBE ${tableName}`);
+            return result.toArray();
+        } catch (error) {
+            throw new Error(`Failed to get table info: ${error.message}`);
+        }
+    }
+    
+    /**
+     * List all available tables
+     * @returns {Promise<Array>} List of table names
+     */
+    async listTables() {
+        if (!this.isInitialized) {
+            throw new Error('DuckDB not initialized');
+        }
+        
+        try {
+            const result = await this.conn.query("SHOW TABLES");
+            const tables = result.toArray();
+            return tables.map(row => row.name);
+        } catch (error) {
+            throw new Error(`Failed to list tables: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Get row count for a table
+     * @param {string} tableName - Name of the table
+     * @returns {Promise<number>} Row count
+     */
+    async getRowCount(tableName) {
+        if (!this.isInitialized) {
+            throw new Error('DuckDB not initialized');
+        }
+        
+        try {
+            const result = await this.conn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+            const rows = result.toArray();
+            return rows[0].count;
+        } catch (error) {
+            throw new Error(`Failed to get row count: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Drop a table
+     * @param {string} tableName - Name of the table to drop
+     * @returns {Promise<void>}
+     */
+    async dropTable(tableName) {
+        if (!this.isInitialized) {
+            throw new Error('DuckDB not initialized');
+        }
+        
+        try {
+            await this.conn.query(`DROP TABLE IF EXISTS ${tableName}`);
+            console.log(`Dropped table: ${tableName}`);
+        } catch (error) {
+            throw new Error(`Failed to drop table: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Close the database connection
+     */
+    async close() {
+        try {
+            if (this.conn) {
+                await this.conn.close();
+                this.conn = null;
+            }
+            if (this.db) {
+                await this.db.terminate();
+                this.db = null;
+            }
+            this.isInitialized = false;
+            console.log('DuckDB connection closed');
+        } catch (error) {
+            console.error('Error closing DuckDB:', error);
+        }
+    }
+    
+    /**
+     * Get database statistics
+     * @returns {Promise<Object>} Database statistics
+     */
+    async getStats() {
+        if (!this.isInitialized) {
+            return { tables: 0, totalRows: 0 };
+        }
+        
+        try {
+            const tables = await this.listTables();
+            let totalRows = 0;
+            
+            for (const table of tables) {
+                const count = await this.getRowCount(table);
+                totalRows += count;
+            }
+            
+            return {
+                tables: tables.length,
+                totalRows: totalRows,
+                tableNames: tables
+            };
+        } catch (error) {
+            console.error('Failed to get database stats:', error);
+            return { tables: 0, totalRows: 0 };
+        }
+    }
+}

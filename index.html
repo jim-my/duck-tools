@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Tools - DuckDB WASM</title>
+    
+    <!-- External dependencies from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@latest/dist/duckdb-mvp.wasm.js"></script>
+    <script src="https://unpkg.com/dropzone@6/dist/dropzone-min.js"></script>
+    <script src="https://unpkg.com/codemirror@5/lib/codemirror.js"></script>
+    <script src="https://unpkg.com/codemirror@5/mode/sql/sql.js"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/dropzone@6/dist/dropzone.css">
+    <link rel="stylesheet" href="https://unpkg.com/codemirror@5/lib/codemirror.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>CSV Tools</h1>
+            <p>Upload CSV files and query with SQL - DuckDB WASM Version</p>
+            <div id="loading-status">Initializing DuckDB...</div>
+        </header>
+        
+        <div id="upload-section" style="display: none;">
+            <h2>Upload Files</h2>
+            <div id="dropzone" class="dropzone">
+                <div class="dz-message">
+                    <strong>Drop CSV files here or click to upload</strong>
+                    <span class="note">(Max file size: 10MB)</span>
+                </div>
+            </div>
+            <div id="file-list"></div>
+        </div>
+        
+        <div id="query-section" style="display: none;">
+            <h2>SQL Query</h2>
+            <div id="sql-editor"></div>
+            <div class="query-controls">
+                <button id="run-query">Run Query</button>
+                <span class="shortcut-hint">Ctrl+Enter to run</span>
+            </div>
+        </div>
+        
+        <div id="results-section" style="display: none;">
+            <h2>Results</h2>
+            <div id="results-table"></div>
+            <div class="export-controls">
+                <button id="export-csv">Export as CSV</button>
+            </div>
+        </div>
+        
+        <div id="error-container"></div>
+    </div>
+    
+    <!-- Load our JavaScript modules -->
+    <script src="js/duckdb-manager.js"></script>
+    <script src="js/file-handler.js"></script>
+    <script src="js/sql-editor.js"></script>
+    <script src="js/results-table.js"></script>
+    <script src="js/csv-exporter.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

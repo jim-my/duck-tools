@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Tools - Test Suite</title>
+    
+    <!-- External dependencies (same as main app) -->
+    <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@latest/dist/duckdb-mvp.wasm.js"></script>
+    <script src="https://unpkg.com/dropzone@6/dist/dropzone-min.js"></script>
+    <script src="https://unpkg.com/codemirror@5/lib/codemirror.js"></script>
+    <script src="https://unpkg.com/codemirror@5/mode/sql/sql.js"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/dropzone@6/dist/dropzone.css">
+    <link rel="stylesheet" href="https://unpkg.com/codemirror@5/lib/codemirror.css">
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 20px;
+            background-color: #f8f9fa;
+        }
+        
+        .test-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .test-controls {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .test-controls button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 0 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        
+        .test-controls button:hover {
+            background: #2980b9;
+        }
+        
+        .test-controls button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        #test-status {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+        
+        .status-running {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .status-completed {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        
+        .status-failed {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        
+        #test-results {
+            margin-top: 20px;
+        }
+        
+        .test-result {
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border-left: 4px solid;
+        }
+        
+        .test-pass {
+            background: #e8f5e8;
+            border-left-color: #4caf50;
+            color: #2e7d32;
+        }
+        
+        .test-fail {
+            background: #ffebee;
+            border-left-color: #f44336;
+            color: #d32f2f;
+        }
+        
+        .test-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .test-error {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 4px;
+        }
+        
+        .test-summary {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #3498db;
+            transition: width 0.3s ease;
+        }
+        
+        /* Hidden dropzone for testing */
+        #test-dropzone {
+            display: none;
+        }
+        
+        #test-sql-editor {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>CSV Tools Test Suite</h1>
+        
+        <div class="test-controls">
+            <button id="run-all-tests">Run All Tests</button>
+            <button id="run-unit-tests">Run Unit Tests</button>
+            <button id="run-integration-tests">Run Integration Tests</button>
+            <button id="clear-results">Clear Results</button>
+        </div>
+        
+        <div id="test-status" style="display: none;"></div>
+        
+        <div class="progress-bar" style="display: none;" id="progress-container">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        
+        <div id="test-results"></div>
+        
+        <div id="test-summary" class="test-summary" style="display: none;"></div>
+        
+        <!-- Hidden elements for testing -->
+        <div id="test-dropzone" class="dropzone"></div>
+        <div id="test-sql-editor"></div>
+        <div id="test-results-table"></div>
+    </div>
+    
+    <!-- Load application modules -->
+    <script src="../js/duckdb-manager.js"></script>
+    <script src="../js/file-handler.js"></script>
+    <script src="../js/sql-editor.js"></script>
+    <script src="../js/results-table.js"></script>
+    <script src="../js/csv-exporter.js"></script>
+    
+    <!-- Load test framework and tests -->
+    <script src="test-framework.js"></script>
+    <script src="unit-tests.js"></script>
+    <script src="integration-tests.js"></script>
+    
+    <script>
+        // Initialize test runner when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Test suite loaded');
+            window.testRunner = new TestRunner();
+            
+            // Setup event listeners
+            document.getElementById('run-all-tests').addEventListener('click', () => {
+                testRunner.runAllTests();
+            });
+            
+            document.getElementById('run-unit-tests').addEventListener('click', () => {
+                testRunner.runUnitTests();
+            });
+            
+            document.getElementById('run-integration-tests').addEventListener('click', () => {
+                testRunner.runIntegrationTests();
+            });
+            
+            document.getElementById('clear-results').addEventListener('click', () => {
+                testRunner.clearResults();
+            });
+        });
+    </script>
+</body>
+</html>

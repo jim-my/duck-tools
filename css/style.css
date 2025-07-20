@@ -1,0 +1,328 @@
+/* CSS Tools - Main Styles */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    color: #333;
+    line-height: 1.6;
+}
+
+#app {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    margin: 0 0 10px 0;
+    color: #2c3e50;
+    font-size: 2.5em;
+}
+
+header p {
+    margin: 0;
+    color: #7f8c8d;
+    font-size: 1.1em;
+}
+
+#loading-status {
+    margin-top: 15px;
+    padding: 10px;
+    background: #e3f2fd;
+    border-radius: 4px;
+    font-weight: 500;
+    color: #1976d2;
+}
+
+/* Section Styles */
+#upload-section,
+#query-section,
+#results-section {
+    background: white;
+    margin-bottom: 20px;
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+h2 {
+    margin: 0 0 20px 0;
+    color: #2c3e50;
+    font-size: 1.5em;
+    border-bottom: 2px solid #ecf0f1;
+    padding-bottom: 10px;
+}
+
+/* Dropzone Customization */
+.dropzone {
+    border: 2px dashed #3498db !important;
+    border-radius: 8px !important;
+    background: #f8f9fa !important;
+    min-height: 150px !important;
+    padding: 20px !important;
+}
+
+.dropzone .dz-message {
+    text-align: center;
+    margin: 2em 0;
+}
+
+.dropzone .dz-message strong {
+    display: block;
+    font-size: 1.2em;
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+.dropzone .dz-message .note {
+    font-size: 0.9em;
+    color: #7f8c8d;
+}
+
+.dropzone:hover {
+    border-color: #2980b9 !important;
+    background: #ecf0f1 !important;
+}
+
+/* File List */
+#file-list {
+    margin-top: 20px;
+}
+
+.file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    margin-bottom: 10px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
+
+.file-name {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.table-alias {
+    color: #3498db;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.9em;
+    margin-left: 10px;
+}
+
+.file-item button {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.file-item button:hover {
+    background: #c0392b;
+}
+
+/* SQL Editor */
+#sql-editor {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.CodeMirror {
+    height: 200px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 14px;
+}
+
+.query-controls {
+    margin-top: 15px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+#run-query {
+    background: #27ae60;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: 500;
+}
+
+#run-query:hover {
+    background: #219a52;
+}
+
+#run-query:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+}
+
+.shortcut-hint {
+    color: #7f8c8d;
+    font-size: 0.9em;
+}
+
+/* Results Table */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 0.9em;
+}
+
+.results-table th {
+    background: #34495e;
+    color: white;
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 500;
+    border-bottom: 2px solid #2c3e50;
+}
+
+.results-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #dee2e6;
+    vertical-align: top;
+}
+
+.results-table tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.results-table tr:hover {
+    background: #e3f2fd;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.pagination button {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.pagination button:hover:not(:disabled) {
+    background: #2980b9;
+}
+
+.pagination button:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+}
+
+/* Export Controls */
+.export-controls {
+    text-align: center;
+    margin-top: 20px;
+}
+
+#export-csv {
+    background: #f39c12;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: 500;
+}
+
+#export-csv:hover {
+    background: #e67e22;
+}
+
+#export-csv:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+}
+
+/* Error Messages */
+.error-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #e74c3c;
+    color: white;
+    padding: 15px 20px;
+    border-radius: 6px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    z-index: 1000;
+    max-width: 400px;
+}
+
+.error-message {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 12px 15px;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    margin-top: 15px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+    
+    #app {
+        margin: 0;
+    }
+    
+    header h1 {
+        font-size: 2em;
+    }
+    
+    .file-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .query-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .results-table {
+        font-size: 0.8em;
+    }
+    
+    .results-table th,
+    .results-table td {
+        padding: 8px 4px;
+    }
+}
