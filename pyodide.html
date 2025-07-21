@@ -104,13 +104,27 @@ import asyncio
 class DuckDBCSVTools:
     def __init__(self):
         self.conn = duckdb.connect(':memory:')
+        self.excel_extension_available = False
+        
         # Install and load Excel extension
         try:
+            console.log("Attempting to install Excel extension...")
             self.conn.execute("INSTALL excel")
+            console.log("Excel extension installed, loading...")
             self.conn.execute("LOAD excel")
-            console.log("DuckDB with Excel support initialized successfully")
+            
+            # Test if Excel extension is working
+            console.log("Testing Excel extension functionality...")
+            test_result = self.conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE extension_name = 'excel'").fetchall()
+            if test_result:
+                self.excel_extension_available = True
+                console.log("DuckDB with Excel support initialized successfully")
+            else:
+                console.log("Excel extension installed but not found in extensions list")
+                
         except Exception as e:
-            console.log(f"DuckDB initialized successfully (Excel support may be limited: {e})")
+            console.error(f"Excel extension initialization failed: {e}")
+            console.log("DuckDB initialized without Excel support - will use fallback for Excel files")
         
         self.tables = {}
         self.table_counter = 1
@@ -195,9 +209,10 @@ class DuckDBCSVTools:
             return {'success': False, 'error': str(e)}
     
     def load_excel_file(self, file_content, filename):
-        """Load Excel data into DuckDB table using official Excel extension"""
+        """Load Excel data into DuckDB table using official Excel extension or fallback"""
         try:
             console.log(f"Starting Excel file processing for {filename}")
+            console.log(f"Excel extension available: {self.excel_extension_available}")
             
             # Decode base64 content to bytes
             file_bytes = base64.b64decode(file_content)
@@ -207,9 +222,12 @@ class DuckDBCSVTools:
             table_name = f"t{self.table_counter}"
             self.table_counter += 1
             
+            if not self.excel_extension_available:
+                console.log("Excel extension not available, using fallback method")
+                return self.load_excel_fallback(file_bytes, filename, table_name)
+            
             try:
                 # Write to a temporary file that DuckDB can access
-                # In Pyodide/browser environment, we can write to the virtual filesystem
                 temp_path = f"/tmp/{filename}"
                 console.log(f"Writing file to virtual filesystem at {temp_path}")
                 
@@ -217,80 +235,105 @@ class DuckDBCSVTools:
                 with open(temp_path, 'wb') as f:
                     f.write(file_bytes)
                 
-                console.log(f"File written successfully, attempting to read with DuckDB...")
+                console.log(f"File written successfully, attempting to read with DuckDB Excel extension...")
                 
-                # First, try to get sheet information
+                # Try different Excel reading approaches
+                success = False
+                
+                # Approach 1: Basic read_xlsx
                 try:
-                    sheets_query = f"SELECT * FROM read_xlsx('{temp_path}', sheet_name='*')"
-                    console.log(f"Attempting to read all sheets with query: {sheets_query}")
-                    
-                    # Use DuckDB's official read_xlsx function with first sheet
+                    console.log("Trying basic read_xlsx...")
                     self.conn.execute(f"""
                         CREATE TABLE {table_name} AS 
                         SELECT * FROM read_xlsx('{temp_path}')
                     """)
+                    success = True
+                    console.log("Basic read_xlsx succeeded")
+                except Exception as e1:
+                    console.log(f"Basic read_xlsx failed: {e1}")
+                
+                # Approach 2: With header specification
+                if not success:
+                    try:
+                        console.log("Trying read_xlsx with header=true...")
+                        self.conn.execute(f"""
+                            CREATE TABLE {table_name} AS 
+                            SELECT * FROM read_xlsx('{temp_path}', header=true)
+                        """)
+                        success = True
+                        console.log("read_xlsx with header succeeded")
+                    except Exception as e2:
+                        console.log(f"read_xlsx with header failed: {e2}")
+                
+                # Approach 3: With all_varchar
+                if not success:
+                    try:
+                        console.log("Trying read_xlsx with all_varchar=true...")
+                        self.conn.execute(f"""
+                            CREATE TABLE {table_name} AS 
+                            SELECT * FROM read_xlsx('{temp_path}', all_varchar=true)
+                        """)
+                        success = True
+                        console.log("read_xlsx with all_varchar succeeded")
+                    except Exception as e3:
+                        console.log(f"read_xlsx with all_varchar failed: {e3}")
+                        # If all DuckDB approaches fail, try fallback
+                        console.log("All DuckDB Excel approaches failed, trying fallback...")
+                        return self.load_excel_fallback(file_bytes, filename, table_name)
+                
+                if success:
+                    console.log(f"Table {table_name} created successfully with DuckDB Excel extension")
                     
-                except Exception as sheet_error:
-                    console.log(f"Default sheet reading failed, trying with specific sheet parameters: {sheet_error}")
+                    # Get table info
+                    count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                    row_count = count_result[0]
+                    console.log(f"Table has {row_count} rows")
                     
-                    # Try with explicit sheet specification
-                    self.conn.execute(f"""
-                        CREATE TABLE {table_name} AS 
-                        SELECT * FROM read_xlsx('{temp_path}', header=true)
-                    """)
-                
-                console.log(f"Table {table_name} created successfully")
-                
-                # Get table info
-                count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
-                row_count = count_result[0]
-                console.log(f"Table has {row_count} rows")
-                
-                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
-                columns = [row[0] for row in columns_result]
-                console.log(f"Table has columns: {columns}")
-                
-                self.tables[table_name] = {
-                    'filename': filename,
-                    'rows': row_count,
-                    'columns': columns,
-                    'size': len(file_bytes),
-                    'has_headers': True  # Excel files typically have headers
-                }
-                
-                console.log(f"Successfully loaded Excel {filename} as {table_name} with {row_count} rows and {len(columns)} columns")
-                return {
-                    'success': True,
-                    'table_name': table_name,
-                    'rows': row_count,
-                    'columns': columns,
-                    'has_headers': True
-                }
+                    columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    columns = [row[0] for row in columns_result]
+                    console.log(f"Table has columns: {columns}")
+                    
+                    self.tables[table_name] = {
+                        'filename': filename,
+                        'rows': row_count,
+                        'columns': columns,
+                        'size': len(file_bytes),
+                        'has_headers': True
+                    }
+                    
+                    console.log(f"Successfully loaded Excel {filename} as {table_name} with {row_count} rows and {len(columns)} columns")
+                    return {
+                        'success': True,
+                        'table_name': table_name,
+                        'rows': row_count,
+                        'columns': columns,
+                        'has_headers': True
+                    }
                 
             except Exception as excel_error:
-                console.error(f"DuckDB Excel reading failed: {excel_error}")
-                console.error(f"Error type: {type(excel_error).__name__}")
-                
-                # Try to provide more specific error information
-                error_message = str(excel_error)
-                if "extension" in error_message.lower():
-                    detailed_error = f"Excel extension not available: {error_message}. The DuckDB Excel extension may not be installed in this Pyodide environment."
-                elif "sheet" in error_message.lower():
-                    detailed_error = f"Sheet reading error: {error_message}. The file may contain multiple sheets or have formatting issues."
-                elif "header" in error_message.lower():
-                    detailed_error = f"Header parsing error: {error_message}. The file may have non-standard headers."
-                else:
-                    detailed_error = f"Excel processing error: {error_message}"
-                
-                return {
-                    'success': False, 
-                    'error': f'{detailed_error}. Please try converting {filename} to CSV format, or check if the file is corrupted.'
-                }
+                console.error(f"DuckDB Excel processing completely failed: {excel_error}")
+                console.log("Attempting fallback Excel processing...")
+                return self.load_excel_fallback(file_bytes, filename, table_name)
             
         except Exception as e:
             console.error(f"Failed to load Excel {filename}: {str(e)}")
-            console.error(f"Error type: {type(e).__name__}")
             return {'success': False, 'error': f'File processing error: {str(e)}. Please ensure the file is a valid Excel (.xlsx) file.'}
+    
+    def load_excel_fallback(self, file_bytes, filename, table_name):
+        """Fallback Excel processing when DuckDB Excel extension is not available"""
+        try:
+            console.log(f"Using fallback Excel processing for {filename}")
+            
+            # For now, return a helpful error message
+            # In a full implementation, we could use openpyxl or xlsxwriter
+            return {
+                'success': False,
+                'error': f'Excel extension not available in this Pyodide environment. To process {filename}:\n\n1. Convert the file to CSV format using Excel/LibreOffice\n2. If the file has multiple sheets, save each sheet as a separate CSV\n3. Upload the CSV file(s) instead\n\nAlternatively, try a different browser or check if the DuckDB Excel extension can be enabled.'
+            }
+            
+        except Exception as e:
+            console.error(f"Fallback Excel processing failed: {e}")
+            return {'success': False, 'error': f'Excel processing failed: {str(e)}'}
     
     def list_excel_sheets(self, file_content, filename):
         """List all sheets in an Excel file"""
