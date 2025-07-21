@@ -94,8 +94,9 @@
     </div>
     
     <!-- DuckDB Python Module -->
-    <script type="py" config='{"packages":["duckdb"]}' id="python-code">
+    <script type="py" config='{"packages":["duckdb", "pandas", "openpyxl"]}' id="python-code">
 import duckdb
+import pandas as pd
 import io
 import base64
 from js import console, document, File, Blob, URL
@@ -338,20 +339,106 @@ class DuckDBCSVTools:
             return {'success': False, 'error': f'File processing error: {str(e)}. Please ensure the file is a valid Excel (.xlsx) file.'}
     
     def load_excel_fallback(self, file_bytes, filename, table_name):
-        """Fallback Excel processing when DuckDB Excel extension is not available"""
+        """Fallback Excel processing using pandas when DuckDB Excel extension is not available"""
         try:
-            console.log(f"Using fallback Excel processing for {filename}")
+            console.log(f"Using pandas fallback for Excel processing: {filename}")
             
-            # For now, return a helpful error message
-            # In a full implementation, we could use openpyxl or xlsxwriter
-            return {
-                'success': False,
-                'error': f'Excel extension not available in this Pyodide environment. To process {filename}:\n\n1. Convert the file to CSV format using Excel/LibreOffice\n2. If the file has multiple sheets, save each sheet as a separate CSV\n3. Upload the CSV file(s) instead\n\nAlternatively, try a different browser or check if the DuckDB Excel extension can be enabled.'
-            }
+            # Create BytesIO object from file bytes for pandas
+            excel_buffer = io.BytesIO(file_bytes)
+            console.log(f"Created BytesIO buffer with {len(file_bytes)} bytes")
+            
+            # Try to read Excel file with pandas
+            try:
+                # First, try to get sheet names
+                try:
+                    excel_file = pd.ExcelFile(excel_buffer)
+                    sheet_names = excel_file.sheet_names
+                    console.log(f"Found sheets in Excel file: {sheet_names}")
+                    
+                    # Read the first sheet (most common case)
+                    first_sheet = sheet_names[0] if sheet_names else 0
+                    console.log(f"Reading first sheet: {first_sheet}")
+                    
+                    # Reset buffer position
+                    excel_buffer.seek(0)
+                    df = pd.read_excel(excel_buffer, sheet_name=first_sheet, engine='openpyxl')
+                    
+                except Exception as sheet_error:
+                    console.log(f"Sheet-specific reading failed: {sheet_error}, trying default read")
+                    # Reset buffer position
+                    excel_buffer.seek(0)
+                    df = pd.read_excel(excel_buffer, engine='openpyxl')
+                
+                console.log(f"Successfully read Excel with pandas: {df.shape[0]} rows, {df.shape[1]} columns")
+                console.log(f"Columns: {list(df.columns)}")
+                
+                # Clean up column names (remove any problematic characters)
+                df.columns = [str(col).strip() for col in df.columns]
+                
+                # Convert DataFrame to DuckDB table using DuckDB's pandas integration
+                console.log(f"Creating DuckDB view from pandas DataFrame...")
+                
+                # Register the DataFrame with DuckDB
+                self.conn.register(f'{table_name}_df', df)
+                
+                # Create a view that references the registered DataFrame
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM {table_name}_df
+                """)
+                
+                console.log(f"Successfully created DuckDB view {table_name} from pandas DataFrame")
+                
+                # Get final table info
+                count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                row_count = count_result[0]
+                
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                columns = [row[0] for row in columns_result]
+                
+                # Store metadata
+                self.tables[table_name] = {
+                    'filename': filename,
+                    'rows': row_count,
+                    'columns': columns,
+                    'size': len(file_bytes),
+                    'has_headers': True,
+                    'file_type': 'excel',
+                    'processing_method': 'pandas_fallback',
+                    'dataframe_name': f'{table_name}_df'  # Store for cleanup
+                }
+                
+                console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
+                
+                return {
+                    'success': True,
+                    'table_name': table_name,
+                    'rows': row_count,
+                    'columns': columns,
+                    'has_headers': True,
+                    'processing_method': 'pandas_fallback'
+                }
+                
+            except Exception as pandas_error:
+                console.error(f"Pandas Excel processing failed: {pandas_error}")
+                
+                # Provide helpful error message with context
+                error_message = str(pandas_error)
+                if "openpyxl" in error_message.lower():
+                    detailed_error = f"Excel reading failed: openpyxl engine error. The file may be corrupted or in an unsupported format."
+                elif "sheet" in error_message.lower():
+                    detailed_error = f"Sheet access error: {error_message}. The file may have protected sheets or unusual structure."
+                else:
+                    detailed_error = f"Excel processing error: {error_message}"
+                
+                return {
+                    'success': False,
+                    'error': f'Pandas fallback failed: {detailed_error}\n\nTo resolve:\n1. Ensure the file is a valid .xlsx format\n2. Check if the file is password-protected or corrupted\n3. Try converting to CSV format as an alternative'
+                }
             
         except Exception as e:
-            console.error(f"Fallback Excel processing failed: {e}")
-            return {'success': False, 'error': f'Excel processing failed: {str(e)}'}
+            console.error(f"Excel fallback processing failed: {e}")
+            return {'success': False, 'error': f'Excel fallback processing failed: {str(e)}. Please ensure the file is a valid Excel (.xlsx) file.'}
     
     def load_excel_sheet(self, filename, sheet_name_or_index):
         """Load a specific sheet from an Excel file"""
@@ -501,9 +588,18 @@ class DuckDBCSVTools:
     def drop_table(self, table_name):
         """Drop a table/view from DuckDB with proper cleanup"""
         try:
-            # Both CSV and Excel files now use views, so drop as view
+            # Drop the view
             self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
             console.log(f"Dropped view {table_name}")
+            
+            # Clean up pandas DataFrame if it exists (for fallback processing)
+            if table_name in self.tables and 'dataframe_name' in self.tables[table_name]:
+                df_name = self.tables[table_name]['dataframe_name']
+                try:
+                    self.conn.unregister(df_name)
+                    console.log(f"Unregistered pandas DataFrame: {df_name}")
+                except Exception as df_cleanup_error:
+                    console.log(f"Could not unregister DataFrame {df_name}: {df_cleanup_error}")
             
             # Clean up temporary file if it exists
             if table_name in self.tables and 'temp_path' in self.tables[table_name]:
