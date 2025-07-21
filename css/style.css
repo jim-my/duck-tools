@@ -69,16 +69,22 @@ h2 {
 
 /* Dropzone Customization */
 .dropzone {
-    border: 2px dashed #3498db !important;
-    border-radius: 8px !important;
-    background: #f8f9fa !important;
-    min-height: 150px !important;
-    padding: 20px !important;
+    border: 2px dashed #3498db;
+    border-radius: 8px;
+    background: #f8f9fa;
+    min-height: 150px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .dropzone .dz-message {
     text-align: center;
-    margin: 2em 0;
+    margin: 0;
 }
 
 .dropzone .dz-message strong {
@@ -93,9 +99,11 @@ h2 {
     color: #7f8c8d;
 }
 
-.dropzone:hover {
-    border-color: #2980b9 !important;
-    background: #ecf0f1 !important;
+.dropzone:hover,
+.dropzone.dragover {
+    border-color: #2980b9;
+    background: #ecf0f1;
+    transform: scale(1.02);
 }
 
 /* File List */

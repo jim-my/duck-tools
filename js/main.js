@@ -2,6 +2,7 @@
  * CSV Tools - Main Application
  * Coordinates all components and manages application state
  */
+
 class CSVTools {
     constructor() {
         this.duckdb = new DuckDBManager();
@@ -474,19 +475,61 @@ class CSVTools {
     }
 }
 
-// Initialize application when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM loaded, initializing CSV Tools...');
-    window.csvTools = new CSVTools();
+// Wait for DuckDB to be ready
+function waitForDuckDB() {
+    return new Promise((resolve) => {
+        const check = () => {
+            if (window.duckdbReady && window.duckdb) {
+                resolve();
+            } else {
+                setTimeout(check, 100);
+            }
+        };
+        check();
+    });
+}
+
+// Initialize application when DOM is ready and DuckDB is loaded
+async function initializeApp() {
+    console.log('DOM loaded, waiting for DuckDB...');
     
-    // Expose fileHandler for button callbacks
-    window.fileHandler = null;
-    
-    // Wait for initialization to complete
-    const checkInitialization = setInterval(() => {
-        if (window.csvTools.isInitialized && window.csvTools.fileHandler) {
-            window.fileHandler = window.csvTools.fileHandler;
-            clearInterval(checkInitialization);
+    try {
+        await waitForDuckDB();
+        console.log('DuckDB ready, initializing CSV Tools...');
+        
+        window.csvTools = new CSVTools();
+        
+        // Expose fileHandler for button callbacks
+        window.fileHandler = null;
+        
+        // Wait for initialization to complete
+        const checkInitialization = setInterval(() => {
+            if (window.csvTools.isInitialized && window.csvTools.fileHandler) {
+                window.fileHandler = window.csvTools.fileHandler;
+                clearInterval(checkInitialization);
+            }
+        }, 100);
+        
+    } catch (error) {
+        console.error('Failed to initialize:', error);
+        const loadingElement = document.getElementById('loading-status');
+        if (loadingElement) {
+            loadingElement.innerHTML = `
+                <div style="color: #e74c3c; font-weight: bold;">
+                    ❌ Initialization Failed
+                </div>
+                <div style="margin-top: 10px; font-size: 0.9em;">
+                    ${error.message}
+                </div>
+                <div style="margin-top: 15px;">
+                    <button onclick="location.reload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Retry
+                    </button>
+                </div>
+            `;
         }
-    }, 100);
-});
+    }
+}
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', initializeApp);

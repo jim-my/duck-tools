@@ -10,27 +10,21 @@ class DuckDBManager {
     }
     
     /**
-     * Initialize DuckDB-WASM
+     * Initialize DuckDB-WASM (Simple Mode)
      * @returns {Promise<boolean>} Success status
      */
     async initialize() {
         try {
             console.log('Initializing DuckDB-WASM...');
             
-            // Get the DuckDB bundle
-            const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
-            const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+            // Use the simple CSV processing interface
+            if (!window.duckdb || !window.duckdbReady) {
+                throw new Error('CSV Tools not ready. Please wait for initialization to complete.');
+            }
             
-            // Create worker and logger
-            const worker = new Worker(bundle.mainWorker);
-            const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
-            
-            // Initialize database
-            this.db = new duckdb.AsyncDuckDB(logger, worker);
-            await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-            
-            // Open connection
-            this.conn = await this.db.connect();
+            // Use the simple interface directly
+            this.db = window.duckdb;
+            this.conn = this.db; // Simple mode doesn't need separate connection
             
             this.isInitialized = true;
             console.log('DuckDB-WASM initialized successfully');
@@ -56,15 +50,8 @@ class DuckDBManager {
         try {
             console.log(`Loading CSV file: ${file.name} as table: ${tableName}`);
             
-            // Read file content
-            const fileContent = await file.text();
-            
-            // Register the CSV content with DuckDB
-            await this.db.registerFileText(file.name, fileContent);
-            
-            // Create table from CSV using DuckDB's read_csv_auto function
-            const createTableQuery = `CREATE TABLE ${tableName} AS SELECT * FROM read_csv_auto('${file.name}')`;
-            await this.conn.query(createTableQuery);
+            // Use the simple loadCSV method
+            await this.db.loadCSV(file, tableName);
             
             console.log(`Successfully loaded ${tableName}`);
             return tableName;
@@ -88,8 +75,7 @@ class DuckDBManager {
         try {
             console.log(`Executing query: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
             
-            const result = await this.conn.query(sql);
-            const resultArray = result.toArray();
+            const resultArray = await this.db.runQuery(sql);
             
             console.log(`Query returned ${resultArray.length} rows`);
             return resultArray;
@@ -111,8 +97,20 @@ class DuckDBManager {
         }
         
         try {
-            const result = await this.conn.query(`DESCRIBE ${tableName}`);
-            return result.toArray();
+            // For simple mode, return basic column info from first row
+            const table = window.csvTables.get(tableName);
+            if (!table || table.length === 0) {
+                return [];
+            }
+            
+            const firstRow = table[0];
+            const columns = Object.keys(firstRow).map(column => ({
+                column_name: column,
+                column_type: 'VARCHAR', // Simple mode treats all as text
+                null: 'YES'
+            }));
+            
+            return columns;
         } catch (error) {
             throw new Error(`Failed to get table info: ${error.message}`);
         }
@@ -128,9 +126,7 @@ class DuckDBManager {
         }
         
         try {
-            const result = await this.conn.query("SHOW TABLES");
-            const tables = result.toArray();
-            return tables.map(row => row.name);
+            return await this.db.listTables();
         } catch (error) {
             throw new Error(`Failed to list tables: ${error.message}`);
         }
@@ -147,9 +143,7 @@ class DuckDBManager {
         }
         
         try {
-            const result = await this.conn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
-            const rows = result.toArray();
-            return rows[0].count;
+            return await this.db.getRowCount(tableName);
         } catch (error) {
             throw new Error(`Failed to get row count: ${error.message}`);
         }
@@ -166,7 +160,7 @@ class DuckDBManager {
         }
         
         try {
-            await this.conn.query(`DROP TABLE IF EXISTS ${tableName}`);
+            await this.db.dropTable(tableName);
             console.log(`Dropped table: ${tableName}`);
         } catch (error) {
             throw new Error(`Failed to drop table: ${error.message}`);

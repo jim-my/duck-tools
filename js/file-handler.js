@@ -7,42 +7,99 @@ class FileHandler {
         this.duckdb = duckdbManager;
         this.uploadedFiles = new Map();
         this.tableCounter = 1;
-        this.dropzone = null;
+        this.fileInput = null;
         
         this.initializeDropzone();
     }
     
     /**
-     * Initialize Dropzone for file uploads
+     * Initialize file upload interface (native HTML5)
      */
     initializeDropzone() {
-        // Configure Dropzone
-        Dropzone.autoDiscover = false;
+        const dropzoneElement = document.getElementById('dropzone');
+        if (!dropzoneElement) {
+            throw new Error('Upload area element not found');
+        }
         
-        this.dropzone = new Dropzone("#dropzone", {
-            url: "/dummy", // Not used since we handle files locally
-            autoProcessQueue: false,
-            acceptedFiles: ".csv",
-            maxFilesize: 10, // 10MB limit
-            maxFiles: 10, // Reasonable limit for browser memory
-            addRemoveLinks: true,
-            
-            // Event handlers
-            addedfile: (file) => this.handleFileAdded(file),
-            removedfile: (file) => this.handleFileRemoved(file),
-            error: (file, errorMessage) => this.handleUploadError(file, errorMessage),
-            
-            // Custom messages
-            dictDefaultMessage: `
-                <strong>Drop CSV files here or click to upload</strong><br>
-                <span class="note">(Max file size: 10MB)</span>
-            `,
-            dictFileTooBig: "File is too big (max 10MB)",
-            dictInvalidFileType: "Only CSV files are supported",
-            dictMaxFilesExceeded: "Maximum 10 files allowed"
-        });
+        // Create file input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.csv';
+        fileInput.multiple = true;
+        fileInput.style.display = 'none';
+        fileInput.addEventListener('change', (e) => this.handleFileInputChange(e));
+        document.body.appendChild(fileInput);
         
-        console.log('Dropzone initialized');
+        // Set up dropzone events
+        dropzoneElement.addEventListener('click', () => fileInput.click());
+        dropzoneElement.addEventListener('dragover', (e) => this.handleDragOver(e));
+        dropzoneElement.addEventListener('drop', (e) => this.handleDrop(e));
+        dropzoneElement.addEventListener('dragenter', (e) => this.handleDragEnter(e));
+        dropzoneElement.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+        
+        this.fileInput = fileInput;
+        console.log('File upload interface initialized');
+    }
+    
+    /**
+     * Handle drag over event
+     */
+    handleDragOver(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.add('dragover');
+    }
+    
+    /**
+     * Handle drag enter event
+     */
+    handleDragEnter(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.add('dragover');
+    }
+    
+    /**
+     * Handle drag leave event
+     */
+    handleDragLeave(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.remove('dragover');
+    }
+    
+    /**
+     * Handle drop event
+     */
+    handleDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.remove('dragover');
+        
+        const files = Array.from(e.dataTransfer.files);
+        this.handleFiles(files);
+    }
+    
+    /**
+     * Handle file input change
+     */
+    handleFileInputChange(e) {
+        const files = Array.from(e.target.files);
+        this.handleFiles(files);
+        e.target.value = ''; // Reset input
+    }
+    
+    /**
+     * Handle multiple files
+     */
+    handleFiles(files) {
+        const csvFiles = files.filter(file => file.name.toLowerCase().endsWith('.csv'));
+        
+        if (csvFiles.length !== files.length) {
+            console.warn('Some files were ignored (only CSV files are supported)');
+        }
+        
+        csvFiles.forEach(file => this.handleFileAdded(file));
     }
     
     /**
@@ -55,7 +112,6 @@ class FileHandler {
             
             // Validate file
             if (!this.validateFile(file)) {
-                this.dropzone.removeFile(file);
                 return;
             }
             
@@ -167,21 +223,13 @@ class FileHandler {
     }
     
     /**
-     * Update file status in dropzone
+     * Update file status display
      * @param {File} file - File object
      * @param {string} status - Status message
      */
     updateFileStatus(file, status) {
-        const filePreview = file.previewElement;
-        if (filePreview) {
-            let statusElement = filePreview.querySelector('.file-status');
-            if (!statusElement) {
-                statusElement = document.createElement('div');
-                statusElement.className = 'file-status';
-                filePreview.appendChild(statusElement);
-            }
-            statusElement.textContent = status;
-        }
+        // For now, just log the status - the file list will show the current state
+        console.log(`File ${file.name}: ${status}`);
     }
     
     /**
@@ -244,8 +292,8 @@ class FileHandler {
             }
             
             if (fileToRemove) {
-                // Remove from dropzone (this will trigger handleFileRemoved)
-                this.dropzone.removeFile(fileToRemove);
+                // Remove the file manually
+                await this.handleFileRemoved(fileToRemove);
             }
         } catch (error) {
             console.error('Error removing file:', error);
@@ -337,8 +385,14 @@ class FileHandler {
      */
     async clearAllFiles() {
         try {
-            // Remove all files from dropzone
-            this.dropzone.removeAllFiles();
+            // Remove all files manually
+            const filesToRemove = Array.from(this.uploadedFiles.keys());
+            for (const file of filesToRemove) {
+                await this.handleFileRemoved(file);
+            }
+            
+            // Clear the file list UI
+            this.updateFileList();
             
             // Reset counter
             this.tableCounter = 1;
