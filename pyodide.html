@@ -356,72 +356,128 @@ class DuckDBCSVTools:
                     sheet_names = excel_file.sheet_names
                     console.log(f"Found sheets in Excel file: {sheet_names}")
                     
-                    # Read the first sheet (most common case)
+                    # Auto-load the first sheet but store info about other sheets
                     first_sheet = sheet_names[0] if sheet_names else 0
-                    console.log(f"Reading first sheet: {first_sheet}")
+                    console.log(f"Auto-loading first sheet: {first_sheet}")
                     
-                    # Reset buffer position
+                    # Reset buffer position and load first sheet
                     excel_buffer.seek(0)
                     df = pd.read_excel(excel_buffer, sheet_name=first_sheet, engine='openpyxl')
                     
+                    console.log(f"Successfully read first sheet with pandas: {df.shape[0]} rows, {df.shape[1]} columns")
+                    console.log(f"Columns: {list(df.columns)}")
+                    
+                    # Clean up column names (remove any problematic characters)
+                    df.columns = [str(col).strip() for col in df.columns]
+                    
+                    # Convert DataFrame to DuckDB table using DuckDB's pandas integration
+                    console.log(f"Creating DuckDB view from pandas DataFrame...")
+                    
+                    # Register the DataFrame with DuckDB
+                    self.conn.register(f'{table_name}_df', df)
+                    
+                    # Create a view that references the registered DataFrame
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM {table_name}_df
+                    """)
+                    
+                    console.log(f"Successfully created DuckDB view {table_name} from pandas DataFrame")
+                    
+                    # Get final table info
+                    count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                    row_count = count_result[0]
+                    
+                    columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    columns = [row[0] for row in columns_result]
+                    
+                    # Store metadata including sheet information for later loading
+                    self.tables[table_name] = {
+                        'filename': filename,
+                        'rows': row_count,
+                        'columns': columns,
+                        'size': len(file_bytes),
+                        'has_headers': True,
+                        'file_type': 'excel',
+                        'processing_method': 'pandas_fallback',
+                        'dataframe_name': f'{table_name}_df',  # Store for cleanup
+                        'available_sheets': sheet_names,
+                        'current_sheet': first_sheet,
+                        'excel_buffer': file_bytes  # Store original bytes for loading other sheets
+                    }
+                    
+                    console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
+                    
+                    return {
+                        'success': True,
+                        'table_name': table_name,
+                        'rows': row_count,
+                        'columns': columns,
+                        'has_headers': True,
+                        'processing_method': 'pandas_fallback',
+                        'available_sheets': sheet_names,
+                        'current_sheet': first_sheet
+                    }
+                    
                 except Exception as sheet_error:
-                    console.log(f"Sheet-specific reading failed: {sheet_error}, trying default read")
+                    console.log(f"Sheet-specific reading failed: {sheet_error}, trying default read with single sheet")
                     # Reset buffer position
                     excel_buffer.seek(0)
                     df = pd.read_excel(excel_buffer, engine='openpyxl')
-                
-                console.log(f"Successfully read Excel with pandas: {df.shape[0]} rows, {df.shape[1]} columns")
-                console.log(f"Columns: {list(df.columns)}")
-                
-                # Clean up column names (remove any problematic characters)
-                df.columns = [str(col).strip() for col in df.columns]
-                
-                # Convert DataFrame to DuckDB table using DuckDB's pandas integration
-                console.log(f"Creating DuckDB view from pandas DataFrame...")
-                
-                # Register the DataFrame with DuckDB
-                self.conn.register(f'{table_name}_df', df)
-                
-                # Create a view that references the registered DataFrame
-                self.conn.execute(f"""
-                    CREATE VIEW {table_name} AS 
-                    SELECT * FROM {table_name}_df
-                """)
-                
-                console.log(f"Successfully created DuckDB view {table_name} from pandas DataFrame")
-                
-                # Get final table info
-                count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
-                row_count = count_result[0]
-                
-                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
-                columns = [row[0] for row in columns_result]
-                
-                # Store metadata including sheet information
-                self.tables[table_name] = {
-                    'filename': filename,
-                    'rows': row_count,
-                    'columns': columns,
-                    'size': len(file_bytes),
-                    'has_headers': True,
-                    'file_type': 'excel',
-                    'processing_method': 'pandas_fallback',
-                    'dataframe_name': f'{table_name}_df',  # Store for cleanup
-                    'available_sheets': sheet_names if 'sheet_names' in locals() else ['Sheet1'],
-                    'current_sheet': first_sheet if 'first_sheet' in locals() else 'Sheet1',
-                    'excel_buffer': file_bytes  # Store original bytes for loading other sheets
-                }
-                
-                console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
-                
-                return {
-                    'success': True,
-                    'table_name': table_name,
-                    'rows': row_count,
-                    'columns': columns,
-                    'has_headers': True,
-                    'processing_method': 'pandas_fallback'
-                }
+                    
+                    # Process as single sheet file
+                    console.log(f"Successfully read Excel with pandas: {df.shape[0]} rows, {df.shape[1]} columns")
+                    console.log(f"Columns: {list(df.columns)}")
+                    
+                    # Clean up column names (remove any problematic characters)
+                    df.columns = [str(col).strip() for col in df.columns]
+                    
+                    # Convert DataFrame to DuckDB table using DuckDB's pandas integration
+                    console.log(f"Creating DuckDB view from pandas DataFrame...")
+                    
+                    # Register the DataFrame with DuckDB
+                    self.conn.register(f'{table_name}_df', df)
+                    
+                    # Create a view that references the registered DataFrame
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM {table_name}_df
+                    """)
+                    
+                    console.log(f"Successfully created DuckDB view {table_name} from pandas DataFrame")
+                    
+                    # Get final table info
+                    count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                    row_count = count_result[0]
+                    
+                    columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    columns = [row[0] for row in columns_result]
+                    
+                    # Store metadata including sheet information
+                    self.tables[table_name] = {
+                        'filename': filename,
+                        'rows': row_count,
+                        'columns': columns,
+                        'size': len(file_bytes),
+                        'has_headers': True,
+                        'file_type': 'excel',
+                        'processing_method': 'pandas_fallback',
+                        'dataframe_name': f'{table_name}_df',  # Store for cleanup
+                        'available_sheets': ['Sheet1'],
+                        'current_sheet': 'Sheet1',
+                        'excel_buffer': file_bytes  # Store original bytes for loading other sheets
+                    }
+                    
+                    console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
+                    
+                    return {
+                        'success': True,
+                        'table_name': table_name,
+                        'rows': row_count,
+                        'columns': columns,
+                        'has_headers': True,
+                        'processing_method': 'pandas_fallback'
+                    }
                 
             except Exception as pandas_error:
                 console.error(f"Pandas Excel processing failed: {pandas_error}")
@@ -518,6 +574,181 @@ class DuckDBCSVTools:
             console.error(f"Failed to load Excel sheet: {str(e)}")
             return {'success': False, 'error': str(e)}
     
+    def load_additional_sheet(self, base_table_name, sheet_name):
+        """Load an additional sheet from an already loaded Excel file"""
+        try:
+            if base_table_name not in self.tables:
+                return {'success': False, 'error': 'Base table not found'}
+            
+            base_info = self.tables[base_table_name]
+            if base_info.get('file_type') != 'excel':
+                return {'success': False, 'error': 'Not an Excel file'}
+            
+            available_sheets = base_info.get('available_sheets', [])
+            if sheet_name not in available_sheets:
+                return {'success': False, 'error': f'Sheet "{sheet_name}" not found. Available sheets: {", ".join(available_sheets)}'}
+            
+            # Check if this sheet is already loaded
+            for table_name, info in self.tables.items():
+                if (info.get('original_filename') == base_info['filename'] and 
+                    info.get('sheet_name') == sheet_name):
+                    return {
+                        'success': False, 
+                        'error': f'Sheet "{sheet_name}" is already loaded as table {table_name}',
+                        'existing_table': table_name
+                    }
+            
+            console.log(f"Loading additional sheet '{sheet_name}' from {base_info['filename']}")
+            
+            # Generate new table name
+            new_table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            # Get the original file bytes
+            file_bytes = base_info.get('excel_buffer')
+            if not file_bytes:
+                return {'success': False, 'error': 'Original file data not available'}
+            
+            # Load the sheet using pandas
+            excel_buffer = io.BytesIO(file_bytes)
+            df = pd.read_excel(excel_buffer, sheet_name=sheet_name, engine='openpyxl')
+            
+            console.log(f"Loaded sheet '{sheet_name}': {df.shape[0]} rows, {df.shape[1]} columns")
+            
+            # Clean up column names
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            # Register DataFrame and create view
+            df_name = f'{new_table_name}_df'
+            self.conn.register(df_name, df)
+            self.conn.execute(f"""
+                CREATE VIEW {new_table_name} AS 
+                SELECT * FROM {df_name}
+            """)
+            
+            # Get table info
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {new_table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {new_table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            # Store metadata
+            self.tables[new_table_name] = {
+                'filename': f"{base_info['filename']} (Sheet: {sheet_name})",
+                'rows': row_count,
+                'columns': columns,
+                'size': len(file_bytes),
+                'has_headers': True,
+                'file_type': 'excel',
+                'processing_method': 'pandas_fallback',
+                'dataframe_name': df_name,
+                'sheet_name': sheet_name,
+                'original_filename': base_info['filename'],
+                'excel_buffer': file_bytes,
+                'available_sheets': available_sheets  # Copy available sheets for potential future loads
+            }
+            
+            console.log(f"Successfully loaded additional sheet '{sheet_name}' as {new_table_name}")
+            
+            return {
+                'success': True,
+                'table_name': new_table_name,
+                'sheet_name': sheet_name,
+                'rows': row_count,
+                'columns': columns
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load additional sheet: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
+    def load_selected_sheets(self, excel_file_info_js, selected_sheets_js):
+        """Load selected sheets from an Excel file as separate tables"""
+        try:
+            # Convert JavaScript objects to Python
+            excel_file_info = excel_file_info_js.to_py() if hasattr(excel_file_info_js, 'to_py') else excel_file_info_js
+            selected_sheets = selected_sheets_js.to_py() if hasattr(selected_sheets_js, 'to_py') else selected_sheets_js
+            
+            filename = excel_file_info['filename']
+            file_bytes = excel_file_info['excel_buffer']
+            
+            # Convert file_bytes to proper bytes if it's a JavaScript array
+            if hasattr(file_bytes, 'to_py'):
+                file_bytes = bytes(file_bytes.to_py())
+            elif not isinstance(file_bytes, bytes):
+                file_bytes = bytes(file_bytes)
+            
+            console.log(f"Loading selected sheets {selected_sheets} from {filename}")
+            console.log(f"File bytes type: {type(file_bytes)}, length: {len(file_bytes)}")
+            
+            loaded_tables = []
+            
+            for sheet_name in selected_sheets:
+                # Generate table name
+                table_name = f"t{self.table_counter}"
+                self.table_counter += 1
+                
+                console.log(f"Loading sheet '{sheet_name}' as table {table_name}")
+                
+                # Load the sheet using pandas
+                excel_buffer = io.BytesIO(file_bytes)
+                df = pd.read_excel(excel_buffer, sheet_name=sheet_name, engine='openpyxl')
+                
+                console.log(f"Loaded sheet '{sheet_name}': {df.shape[0]} rows, {df.shape[1]} columns")
+                
+                # Clean up column names
+                df.columns = [str(col).strip() for col in df.columns]
+                
+                # Register DataFrame and create view
+                df_name = f'{table_name}_df'
+                self.conn.register(df_name, df)
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM {df_name}
+                """)
+                
+                # Get table info
+                count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                row_count = count_result[0]
+                
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                columns = [row[0] for row in columns_result]
+                
+                # Store metadata
+                self.tables[table_name] = {
+                    'filename': f"{filename} (Sheet: {sheet_name})",
+                    'rows': row_count,
+                    'columns': columns,
+                    'size': len(file_bytes),
+                    'has_headers': True,
+                    'file_type': 'excel',
+                    'processing_method': 'pandas_fallback',
+                    'dataframe_name': df_name,
+                    'sheet_name': sheet_name,
+                    'original_filename': filename,
+                    'excel_buffer': file_bytes
+                }
+                
+                loaded_tables.append({
+                    'table_name': table_name,
+                    'sheet_name': sheet_name,
+                    'rows': row_count,
+                    'columns': columns
+                })
+                
+                console.log(f"Successfully loaded sheet '{sheet_name}' as {table_name}")
+            
+            return {
+                'success': True,
+                'loaded_tables': loaded_tables,
+                'filename': filename
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load selected sheets: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
     def switch_excel_sheet(self, table_name, sheet_name):
         """Switch to a different sheet for an existing Excel file"""
         try:
@@ -996,7 +1227,12 @@ window.csv_tools = csv_tools
                     console.log('Excel processing result:', result);
                     
                     if (result.success) {
-                        showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns)`);
+                        // Always auto-load first sheet now
+                        if (result.available_sheets && result.available_sheets.length > 1) {
+                            showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns) - First sheet: ${result.current_sheet}. Additional sheets available.`);
+                        } else {
+                            showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns)`);
+                        }
                         updateSQLEditorWithTables();
                     } else {
                         console.error('Excel loading failed:', result.error);
@@ -1076,25 +1312,48 @@ window.csv_tools = csv_tools
                         </div>`;
                 }
                 
-                // Add sheet selector for Excel files with multiple sheets
+                // Add additional sheet loader for Excel files with multiple sheets
                 if (isExcel && info.available_sheets && info.available_sheets.length > 1) {
-                    const currentSheet = info.current_sheet || info.available_sheets[0];
-                    html += `
-                        <div class="sheet-selector">
-                            <label for="sheet-${tableName}">Sheet:</label>
-                            <select id="sheet-${tableName}" onchange="switchSheet('${tableName}', this.value)">`;
-                    
-                    info.available_sheets.forEach(sheetName => {
-                        const selected = sheetName === currentSheet ? 'selected' : '';
-                        html += `<option value="${sheetName}" ${selected}>${sheetName}</option>`;
+                    const currentSheet = info.current_sheet || info.sheet_name || info.available_sheets[0];
+                    const unloadedSheets = info.available_sheets.filter(sheetName => {
+                        // Check if this sheet is already loaded
+                        const originalFilename = info.original_filename || info.filename.split(' (Sheet:')[0];
+                        for (const [otherTableName, otherInfo] of Object.entries(tableInfo.tables)) {
+                            if (otherInfo.file_type === 'excel' && 
+                                (otherInfo.original_filename === originalFilename || 
+                                 otherInfo.filename.split(' (Sheet:')[0] === originalFilename) &&
+                                (otherInfo.sheet_name === sheetName || otherInfo.current_sheet === sheetName)) {
+                                return false; // Already loaded
+                            }
+                        }
+                        return true;
                     });
                     
                     html += `
-                            </select>
+                        <div class="sheet-info">
+                            <span class="sheet-name">Current Sheet: ${currentSheet}</span>
                         </div>`;
+                    
+                    if (unloadedSheets.length > 0) {
+                        html += `
+                            <div class="additional-sheets">
+                                <label for="additional-sheet-${tableName}" style="font-size: 12px; color: #666;">
+                                    Load additional sheet:
+                                </label>
+                                <select id="additional-sheet-${tableName}" style="margin-left: 5px; font-size: 12px;" onchange="loadAdditionalSheet('${tableName}', this.value)">
+                                    <option value="">Choose sheet...</option>`;
+                        
+                        unloadedSheets.forEach(sheetName => {
+                            html += `<option value="${sheetName}">${sheetName}</option>`;
+                        });
+                        
+                        html += `
+                                </select>
+                            </div>`;
+                    }
                 } else if (isExcel) {
                     // Show current sheet info even if only one sheet
-                    const currentSheet = info.current_sheet || 'Sheet1';
+                    const currentSheet = info.current_sheet || info.sheet_name || 'Sheet1';
                     html += `
                         <div class="sheet-info">
                             <span class="sheet-name">Sheet: ${currentSheet}</span>
@@ -1307,6 +1566,45 @@ window.csv_tools = csv_tools
             } catch (error) {
                 console.error('Sheet switching error:', error);
                 showError(`Error switching sheet: ${error.message}`);
+            }
+        }
+        
+        async function loadAdditionalSheet(baseTableName, sheetName) {
+            if (!sheetName) return; // User selected "Choose sheet..." option
+            
+            try {
+                showInfo(`Loading additional sheet: ${sheetName}...`);
+                
+                const resultRaw = window.csv_tools.load_additional_sheet(baseTableName, sheetName);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    updateFileList();
+                    updateSQLEditorWithTables();
+                    showSuccess(`Successfully loaded sheet "${sheetName}" as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns)`);
+                } else {
+                    if (result.existing_table) {
+                        showError(`Sheet "${sheetName}" is already loaded as ${result.existing_table}`);
+                    } else {
+                        showError(`Failed to load sheet: ${result.error}`);
+                    }
+                }
+                
+                // Reset the dropdown
+                const dropdown = document.getElementById(`additional-sheet-${baseTableName}`);
+                if (dropdown) {
+                    dropdown.value = '';
+                }
+                
+            } catch (error) {
+                console.error('Additional sheet loading error:', error);
+                showError(`Error loading additional sheet: ${error.message}`);
+                
+                // Reset the dropdown
+                const dropdown = document.getElementById(`additional-sheet-${baseTableName}`);
+                if (dropdown) {
+                    dropdown.value = '';
+                }
             }
         }
         
