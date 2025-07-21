@@ -130,76 +130,78 @@ class DuckDBCSVTools:
         self.table_counter = 1
     
     def load_csv_file(self, file_content, filename, has_headers=True):
-        """Load CSV data into DuckDB table using pure DuckDB"""
+        """Load CSV data into DuckDB using native read_csv with file alias"""
         try:
             # Generate table name
             table_name = f"t{self.table_counter}"
             self.table_counter += 1
             
-            # Use DuckDB's read_csv with direct string content
-            lines = file_content.strip().split('\n')
+            console.log(f"Loading CSV {filename} as {table_name} with has_headers={has_headers}")
             
+            # Write CSV content to virtual filesystem for DuckDB to read
+            temp_path = f"/tmp/{filename}"
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(file_content)
+            
+            console.log(f"Written CSV to virtual filesystem: {temp_path}")
+            
+            # Use DuckDB's native read_csv function to create a view/alias
             if has_headers:
-                header = lines[0].split(',')
-                data_start_line = 1
+                # Read CSV with headers
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_csv('{temp_path}', header=true, auto_detect=true)
+                """)
             else:
-                # Generate c1, c2, c3... headers
-                first_row = lines[0].split(',')
-                header = [f"c{i+1}" for i in range(len(first_row))]
-                data_start_line = 0
+                # Read CSV without headers, let DuckDB auto-generate column names
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
+                
+                # Get the auto-generated column names and rename them to c1, c2, c3...
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                original_columns = [row[0] for row in columns_result]
+                
+                # Create new column aliases c1, c2, c3...
+                column_aliases = []
+                for i, col in enumerate(original_columns):
+                    column_aliases.append(f'"{col}" as c{i+1}')
+                
+                # Recreate view with proper column names
+                columns_sql = ', '.join(column_aliases)
+                self.conn.execute(f"DROP VIEW {table_name}")
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT {columns_sql} FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
             
-            # Clean up header names (remove quotes if present)
-            clean_header = [col.strip().strip('"\'') for col in header]
-            
-            # Create the table schema first
-            columns_sql = ', '.join([f'"{col}" VARCHAR' for col in clean_header])
-            self.conn.execute(f"CREATE TABLE {table_name} ({columns_sql})")
-            
-            # Insert data row by row
-            for line in lines[data_start_line:]:
-                if line.strip():  # Skip empty lines
-                    # Parse CSV line (basic parsing - handles quoted fields)
-                    values = []
-                    current_value = ""
-                    in_quotes = False
-                    
-                    for char in line:
-                        if char == '"' and not in_quotes:
-                            in_quotes = True
-                        elif char == '"' and in_quotes:
-                            in_quotes = False
-                        elif char == ',' and not in_quotes:
-                            values.append(current_value.strip().strip('"\''))
-                            current_value = ""
-                        else:
-                            current_value += char
-                    
-                    # Add the last value
-                    values.append(current_value.strip().strip('"\''))
-                    
-                    # Insert the row
-                    if len(values) == len(clean_header):
-                        placeholders = ', '.join(['?' for _ in values])
-                        self.conn.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
+            console.log(f"Created DuckDB view {table_name}")
             
             # Get table info
             count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
             row_count = count_result[0]
             
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            console.log(f"View has {row_count} rows and columns: {columns}")
+            
             # Store metadata
             self.tables[table_name] = {
                 'filename': filename,
                 'rows': row_count,
-                'columns': clean_header,
+                'columns': columns,
                 'size': len(file_content),
-                'has_headers': has_headers
+                'has_headers': has_headers,
+                'temp_path': temp_path  # Store path for potential reloading
             }
             
-            console.log(f"Loaded {filename} as {table_name} with {row_count} rows and {len(clean_header)} columns (has_headers: {has_headers})")
+            console.log(f"Successfully loaded CSV {filename} as view {table_name} with {row_count} rows and {len(columns)} columns")
             return {
                 'table_name': table_name,
                 'rows': row_count,
-                'columns': clean_header,
+                'columns': columns,
                 'success': True,
                 'has_headers': has_headers
             }
@@ -407,52 +409,115 @@ class DuckDBCSVTools:
         }
     
     def drop_table(self, table_name):
-        """Drop a table from DuckDB"""
+        """Drop a table/view from DuckDB"""
         try:
-            # Drop from DuckDB
-            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            # Try to drop as view first (for CSV files), then as table (for Excel files)
+            try:
+                self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+                console.log(f"Dropped view {table_name}")
+            except:
+                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                console.log(f"Dropped table {table_name}")
+            
+            # Clean up temporary file if it exists
+            if table_name in self.tables and 'temp_path' in self.tables[table_name]:
+                temp_path = self.tables[table_name]['temp_path']
+                try:
+                    import os
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                        console.log(f"Cleaned up temp file: {temp_path}")
+                except Exception as cleanup_error:
+                    console.log(f"Could not clean up temp file {temp_path}: {cleanup_error}")
             
             # Remove from local tracking
             if table_name in self.tables:
                 del self.tables[table_name]
                 
-            console.log(f"Dropped table {table_name}")
+            console.log(f"Successfully removed {table_name}")
             return {'success': True}
         except Exception as e:
-            console.error(f"Failed to drop table {table_name}: {str(e)}")
+            console.error(f"Failed to drop {table_name}: {str(e)}")
             return {'success': False, 'error': str(e)}
     
     def reload_table_with_headers(self, table_name, file_content, has_headers):
-        """Reload an existing table with different header settings"""
+        """Reload an existing view with different header settings"""
         try:
             if table_name not in self.tables:
-                return {'success': False, 'error': 'Table not found'}
+                return {'success': False, 'error': 'View not found'}
             
-            # Get the original filename
+            console.log(f"Reloading view {table_name} with has_headers={has_headers}")
+            
+            # Get the original filename and temp path
             filename = self.tables[table_name]['filename']
+            temp_path = self.tables[table_name]['temp_path']
             
-            # Drop the existing table
-            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            # Drop the existing view
+            self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+            console.log(f"Dropped existing view {table_name}")
             
-            # Reload with new header setting (keeping same table name)
-            # Temporarily reduce counter since we're reusing the name
-            current_counter = self.table_counter
-            table_num = int(table_name[1:])  # Extract number from 't1', 't2', etc.
-            self.table_counter = table_num
+            # Write updated CSV content to same temp path
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(file_content)
+            console.log(f"Updated CSV content in {temp_path}")
             
-            result = self.load_csv_file(file_content, filename, has_headers)
+            # Recreate view with new header setting
+            if has_headers:
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_csv('{temp_path}', header=true, auto_detect=true)
+                """)
+            else:
+                # Read without headers and create c1, c2, c3... aliases
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name}_temp AS 
+                    SELECT * FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
+                
+                # Get auto-generated columns and create aliases
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}_temp").fetchall()
+                original_columns = [row[0] for row in columns_result]
+                
+                column_aliases = []
+                for i, col in enumerate(original_columns):
+                    column_aliases.append(f'"{col}" as c{i+1}')
+                
+                columns_sql = ', '.join(column_aliases)
+                self.conn.execute(f"DROP VIEW {table_name}_temp")
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT {columns_sql} FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
             
-            # Restore counter to continue from where we were
-            self.table_counter = current_counter
+            console.log(f"Recreated view {table_name}")
             
-            if result['success']:
-                result['reloaded'] = True
-                console.log(f"Reloaded {table_name} with has_headers={has_headers}")
+            # Update metadata
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
             
-            return result
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            self.tables[table_name].update({
+                'rows': row_count,
+                'columns': columns,
+                'has_headers': has_headers,
+                'size': len(file_content)
+            })
+            
+            console.log(f"Successfully reloaded {table_name} with {row_count} rows and columns: {columns}")
+            
+            return {
+                'success': True,
+                'table_name': table_name,
+                'rows': row_count,
+                'columns': columns,
+                'has_headers': has_headers,
+                'reloaded': True
+            }
             
         except Exception as e:
-            console.error(f"Failed to reload table {table_name}: {str(e)}")
+            console.error(f"Failed to reload view {table_name}: {str(e)}")
             return {'success': False, 'error': str(e)}
     
     def export_to_csv(self, sql):
