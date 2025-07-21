@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Tools - DuckDB + Pyodide Version</title>
+    
+    <!-- CodeMirror for SQL editing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+    
+    <!-- PyScript for DuckDB integration -->
+    <script type="module" src="https://pyscript.net/releases/2024.8.2/core.js"></script>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    
+    <style>
+        .version-badge {
+            background: #f39c12;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+        .loading-progress {
+            width: 100%;
+            height: 4px;
+            background: #ecf0f1;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .loading-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #9b59b6);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>CSV Tools <span class="version-badge">DuckDB + Pyodide</span></h1>
+            <p>Upload CSV/Excel files and query with full SQL - DuckDB-powered</p>
+            <div id="loading-status">Initializing Pyodide environment...</div>
+            <div class="loading-progress">
+                <div class="loading-bar" id="loading-bar"></div>
+            </div>
+        </header>
+        
+        <div id="upload-section" style="display: none;">
+            <h2>Upload Files</h2>
+            <div id="dropzone" class="dropzone">
+                <div class="dz-message">
+                    <strong>Drop CSV/Excel files here or click to upload</strong>
+                    <span class="note">(Supports .csv, .xlsx files - Max size: 50MB)</span>
+                </div>
+            </div>
+            <div id="file-list"></div>
+        </div>
+        
+        <div id="query-section" style="display: none;">
+            <h2>SQL Query</h2>
+            <div id="sql-editor"></div>
+            <div class="query-controls">
+                <button id="run-query">Run Query</button>
+                <span class="shortcut-hint">Ctrl+Enter to run</span>
+                <div class="query-examples">
+                    <select id="example-queries">
+                        <option value="">Load example query...</option>
+                        <option value="SELECT * FROM t1 LIMIT 10;">Basic SELECT</option>
+                        <option value="SELECT column, COUNT(*) as count FROM t1 GROUP BY column ORDER BY count DESC;">Group By Count</option>
+                        <option value="SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;">Inner Join</option>
+                        <option value="SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY value DESC) as rank FROM t1;">Window Function</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div id="results-section" style="display: none;">
+            <h2>Results</h2>
+            <div id="query-info" class="query-info"></div>
+            <div id="results-table"></div>
+            <div class="export-controls">
+                <button id="export-csv">Export as CSV</button>
+            </div>
+        </div>
+        
+        <div id="error-container"></div>
+    </div>
+    
+    <!-- DuckDB Python Module -->
+    <script type="py" config='{"packages":["duckdb"]}' id="python-code">
+import duckdb
+import io
+import base64
+from js import console, document, File, Blob, URL
+import asyncio
+
+class DuckDBCSVTools:
+    def __init__(self):
+        self.conn = duckdb.connect(':memory:')
+        # Install and load Excel extension
+        try:
+            self.conn.execute("INSTALL excel")
+            self.conn.execute("LOAD excel")
+            console.log("DuckDB with Excel support initialized successfully")
+        except Exception as e:
+            console.log(f"DuckDB initialized successfully (Excel support may be limited: {e})")
+        
+        self.tables = {}
+        self.table_counter = 1
+    
+    def load_csv_file(self, file_content, filename):
+        """Load CSV data into DuckDB table using pure DuckDB"""
+        try:
+            # Generate table name
+            table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            # Use DuckDB's read_csv with direct string content
+            # Create table directly from CSV string using VALUES and UNNEST
+            lines = file_content.strip().split('\n')
+            header = lines[0].split(',')
+            
+            # Clean up header names (remove quotes if present)
+            clean_header = [col.strip().strip('"\'') for col in header]
+            
+            # Create the table schema first
+            columns_sql = ', '.join([f'"{col}" VARCHAR' for col in clean_header])
+            self.conn.execute(f"CREATE TABLE {table_name} ({columns_sql})")
+            
+            # Insert data row by row
+            for line in lines[1:]:
+                if line.strip():  # Skip empty lines
+                    # Parse CSV line (basic parsing - handles quoted fields)
+                    values = []
+                    current_value = ""
+                    in_quotes = False
+                    
+                    for char in line:
+                        if char == '"' and not in_quotes:
+                            in_quotes = True
+                        elif char == '"' and in_quotes:
+                            in_quotes = False
+                        elif char == ',' and not in_quotes:
+                            values.append(current_value.strip().strip('"\''))
+                            current_value = ""
+                        else:
+                            current_value += char
+                    
+                    # Add the last value
+                    values.append(current_value.strip().strip('"\''))
+                    
+                    # Insert the row
+                    if len(values) == len(clean_header):
+                        placeholders = ', '.join(['?' for _ in values])
+                        self.conn.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
+            
+            # Get table info
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            # Store metadata
+            self.tables[table_name] = {
+                'filename': filename,
+                'rows': row_count,
+                'columns': clean_header,
+                'size': len(file_content)
+            }
+            
+            console.log(f"Loaded {filename} as {table_name} with {row_count} rows and {len(clean_header)} columns (pure DuckDB)")
+            return {
+                'table_name': table_name,
+                'rows': row_count,
+                'columns': clean_header,
+                'success': True
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load CSV {filename}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def load_excel_file(self, file_content, filename):
+        """Load Excel data into DuckDB table using official Excel extension"""
+        try:
+            # Decode base64 content to bytes
+            file_bytes = base64.b64decode(file_content)
+            
+            # Generate table name
+            table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            try:
+                # Write to a temporary file that DuckDB can access
+                # In Pyodide/browser environment, we can write to the virtual filesystem
+                temp_path = f"/tmp/{filename}"
+                
+                # Write the file to the virtual filesystem
+                with open(temp_path, 'wb') as f:
+                    f.write(file_bytes)
+                
+                # Use DuckDB's official read_xlsx function  
+                self.conn.execute(f"""
+                    CREATE TABLE {table_name} AS 
+                    SELECT * FROM read_xlsx('{temp_path}')
+                """)
+                
+                # Get table info
+                count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                row_count = count_result[0]
+                
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                columns = [row[0] for row in columns_result]
+                
+                self.tables[table_name] = {
+                    'filename': filename,
+                    'rows': row_count,
+                    'columns': columns,
+                    'size': len(file_bytes)
+                }
+                
+                console.log(f"Loaded Excel {filename} as {table_name} with {row_count} rows and {len(columns)} columns using official Excel extension")
+                return {
+                    'success': True,
+                    'table_name': table_name,
+                    'rows': row_count,
+                    'columns': columns
+                }
+                
+            except Exception as excel_error:
+                console.log(f"DuckDB Excel reading failed: {excel_error}")
+                # Fallback message with more specific error
+                return {
+                    'success': False, 
+                    'error': f'Excel reading failed: {excel_error}. The Excel extension may not be available in this browser environment. Please convert {filename} to CSV format.'
+                }
+            
+        except Exception as e:
+            console.error(f"Failed to load Excel {filename}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def execute_query(self, sql):
+        """Execute SQL query using pure DuckDB"""
+        try:
+            # Execute query with DuckDB and get results as list
+            result = self.conn.execute(sql).fetchall()
+            
+            # Get column names
+            columns = [desc[0] for desc in self.conn.description]
+            
+            # Convert to list of dictionaries
+            data = []
+            for row in result:
+                data.append({columns[i]: row[i] for i in range(len(columns))})
+            
+            # Convert to JSON-serializable format
+            result_dict = {
+                'success': True,
+                'rows': len(result),
+                'columns': columns,
+                'data': data,
+                'query': sql
+            }
+            
+            console.log(f"Query executed successfully: {len(result)} rows returned")
+            return result_dict
+            
+        except Exception as e:
+            console.error(f"Query failed: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': sql
+            }
+    
+    
+    def get_table_info(self):
+        """Get information about all loaded tables"""
+        return {
+            'tables': self.tables,
+            'count': len(self.tables)
+        }
+    
+    def drop_table(self, table_name):
+        """Drop a table from DuckDB"""
+        try:
+            # Drop from DuckDB
+            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            
+            # Remove from local tracking
+            if table_name in self.tables:
+                del self.tables[table_name]
+                
+            console.log(f"Dropped table {table_name}")
+            return {'success': True}
+        except Exception as e:
+            console.error(f"Failed to drop table {table_name}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def export_to_csv(self, sql):
+        """Export query results to CSV using pure DuckDB"""
+        try:
+            result = self.conn.execute(sql).fetchall()
+            columns = [desc[0] for desc in self.conn.description]
+            
+            # Build CSV content
+            csv_lines = [','.join(columns)]  # Header
+            for row in result:
+                csv_lines.append(','.join([str(val) if val is not None else '' for val in row]))
+            
+            csv_content = '\n'.join(csv_lines)
+            
+            return {
+                'success': True,
+                'content': csv_content,
+                'rows': len(result)
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+
+# Global instance
+csv_tools = DuckDBCSVTools()
+
+# Make it accessible to JavaScript
+from js import window
+window.csv_tools = csv_tools
+    </script>
+    
+    <!-- JavaScript Application -->
+    <script>
+        let pyodide;
+        let csvTools;
+        
+        // Initialize PyScript and DuckDB
+        async function initializePyScript() {
+            try {
+                updateLoadingStatus("Loading PyScript runtime...", 20);
+                
+                // Wait for PyScript to be ready
+                await new Promise((resolve) => {
+                    document.addEventListener('py:ready', () => {
+                        console.log('PyScript ready event received');
+                        resolve();
+                    });
+                });
+                
+                updateLoadingStatus("Initializing DuckDB...", 60);
+                
+                // Wait a bit more for Python code to execute
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Get the Python CSV tools instance
+                window.csvTools = window.csv_tools;
+                csvTools = window.csv_tools;
+                
+                updateLoadingStatus("Ready!", 100);
+                
+                // Initialize UI
+                setTimeout(() => {
+                    initializeUI();
+                }, 500);
+                
+            } catch (error) {
+                console.error('Failed to initialize PyScript:', error);
+                showError(`Initialization failed: ${error.message}`);
+            }
+        }
+        
+        function updateLoadingStatus(message, progress = 0) {
+            const statusElement = document.getElementById('loading-status');
+            const progressBar = document.getElementById('loading-bar');
+            
+            if (statusElement) {
+                statusElement.textContent = message;
+            }
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+            }
+        }
+        
+        function initializeUI() {
+            // Hide loading and show main sections
+            document.getElementById('loading-status').style.display = 'none';
+            document.querySelector('.loading-progress').style.display = 'none';
+            document.getElementById('upload-section').style.display = 'block';
+            document.getElementById('query-section').style.display = 'block';
+            document.getElementById('results-section').style.display = 'block';
+            
+            // Initialize SQL editor
+            initializeSQLEditor();
+            
+            // Initialize file upload
+            initializeFileUpload();
+            
+            // Initialize event listeners
+            initializeEventListeners();
+            
+            console.log('Pyodide CSV Tools ready!');
+        }
+        
+        function initializeSQLEditor() {
+            window.sqlEditor = CodeMirror(document.getElementById('sql-editor'), {
+                mode: 'text/x-sql',
+                theme: 'default',
+                lineNumbers: true,
+                autoCloseBrackets: true,
+                matchBrackets: true,
+                indentUnit: 2,
+                lineWrapping: true,
+                value: '-- Welcome to CSV Tools with DuckDB!\n-- Upload some files and start querying\n\nSELECT * FROM t1 LIMIT 10;'
+            });
+        }
+        
+        function initializeFileUpload() {
+            const dropzone = document.getElementById('dropzone');
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.csv,.xlsx';
+            fileInput.multiple = true;
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+            
+            dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('dragover', handleDragOver);
+            dropzone.addEventListener('drop', handleDrop);
+            dropzone.addEventListener('dragenter', handleDragEnter);
+            dropzone.addEventListener('dragleave', handleDragLeave);
+            
+            fileInput.addEventListener('change', handleFileSelect);
+        }
+        
+        function initializeEventListeners() {
+            document.getElementById('run-query').addEventListener('click', executeQuery);
+            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+            document.getElementById('example-queries').addEventListener('change', loadExampleQuery);
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    executeQuery();
+                }
+            });
+        }
+        
+        // File handling functions
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragEnter(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            processFiles(files);
+        }
+        
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            processFiles(files);
+            e.target.value = '';
+        }
+        
+        async function processFiles(files) {
+            for (const file of files) {
+                await processFile(file);
+            }
+            updateFileList();
+        }
+        
+        async function processFile(file) {
+            try {
+                showInfo(`Processing ${file.name}...`);
+                
+                const isExcel = file.name.match(/\\.xlsx$/i);
+                const isOldExcel = file.name.match(/\\.xls$/i);
+                
+                if (isOldExcel) {
+                    // Handle old .xls format (not supported by DuckDB)
+                    showError(`${file.name} uses the old .xls format which is not supported. Please save as .xlsx format instead.`);
+                } else if (isExcel) {
+                    // Process Excel file using official DuckDB Excel extension
+                    const arrayBuffer = await file.arrayBuffer();
+                    const base64Content = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    
+                    const resultRaw = window.csv_tools.load_excel_file(base64Content, file.name);
+                    const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                    
+                    if (result.success) {
+                        showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows)`);
+                        updateSQLEditorWithTables();
+                    } else {
+                        showError(`Failed to load ${file.name}: ${result.error}`);
+                    }
+                } else {
+                    // Process CSV file
+                    const content = await file.text();
+                    const resultRaw = window.csv_tools.load_csv_file(content, file.name);
+                    const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                    
+                    if (result.success) {
+                        showSuccess(`Loaded ${file.name} as ${result.table_name} (${result.rows} rows)`);
+                        updateSQLEditorWithTables();
+                    } else {
+                        showError(`Failed to load ${file.name}: ${result.error}`);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('File processing error:', error);
+                showError(`Error processing ${file.name}: ${error.message}`);
+            }
+        }
+        
+        function updateSQLEditorWithTables() {
+            const tableInfoRaw = window.csv_tools.get_table_info();
+            const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfoRaw;
+            const tableNames = Object.keys(tableInfo.tables);
+            
+            if (tableNames.length > 0) {
+                const comment = `-- Available tables: ${tableNames.join(', ')}\\n\\n`;
+                const currentValue = window.sqlEditor.getValue();
+                if (!currentValue.includes('Available tables:')) {
+                    window.sqlEditor.setValue(comment + currentValue);
+                }
+            }
+        }
+        
+        function updateFileList() {
+            const tableInfoRaw = window.csv_tools.get_table_info();
+            const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfoRaw;
+            const fileListContainer = document.getElementById('file-list');
+            
+            if (Object.keys(tableInfo.tables).length === 0) {
+                fileListContainer.innerHTML = '<p class="no-files">No files loaded yet</p>';
+                return;
+            }
+            
+            let html = '<div class="uploaded-files">';
+            for (const [tableName, info] of Object.entries(tableInfo.tables)) {
+                html += `
+                    <div class="file-item">
+                        <div class="file-info">
+                            <span class="file-name">${info.filename}</span>
+                            <span class="table-alias">→ ${tableName}</span>
+                        </div>
+                        <div class="file-stats">
+                            ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
+                        </div>
+                        <div class="file-actions">
+                            <button onclick="removeTable('${tableName}')" class="remove-btn">Remove</button>
+                        </div>
+                    </div>`;
+            }
+            html += '</div>';
+            fileListContainer.innerHTML = html;
+        }
+        
+        async function executeQuery() {
+            try {
+                const sql = window.sqlEditor.getValue().trim();
+                if (!sql) {
+                    showError('Please enter a SQL query');
+                    return;
+                }
+                
+                showInfo('Executing query...');
+                
+                const result = window.csv_tools.execute_query(sql);
+                
+                // Convert PyScript result to JavaScript object
+                const jsResult = result.toJs ? result.toJs() : result;
+                
+                if (jsResult.success) {
+                    displayResults(jsResult);
+                    showSuccess(`Query executed: ${jsResult.rows} rows returned`);
+                } else {
+                    showError(`Query failed: ${jsResult.error}`);
+                    clearResults();
+                }
+                
+            } catch (error) {
+                console.error('Query execution error:', error);
+                showError(`Query execution failed: ${error.message}`);
+                clearResults();
+            }
+        }
+        
+        function displayResults(result) {
+            const resultsContainer = document.getElementById('results-table');
+            const queryInfo = document.getElementById('query-info');
+            
+            // Show query info
+            queryInfo.innerHTML = `
+                <div class="query-summary">
+                    <strong>${result.rows.toLocaleString()}</strong> rows, 
+                    <strong>${result.columns.length}</strong> columns
+                </div>
+            `;
+            
+            if (result.rows === 0) {
+                resultsContainer.innerHTML = '<p class="no-results">Query returned no results</p>';
+                return;
+            }
+            
+            // Create table
+            let html = '<table class="results-table"><thead><tr>';
+            result.columns.forEach(col => {
+                html += `<th>${escapeHtml(col)}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            
+            // Show first 1000 rows
+            const displayRows = result.data.slice(0, 1000);
+            displayRows.forEach(row => {
+                html += '<tr>';
+                result.columns.forEach(col => {
+                    const value = row[col];
+                    html += `<td>${escapeHtml(String(value ?? ''))}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            if (result.rows > 1000) {
+                html += `<p class="display-note">Showing first 1,000 rows of ${result.rows.toLocaleString()} total rows. Use LIMIT in your query or export for full results.</p>`;
+            }
+            
+            resultsContainer.innerHTML = html;
+            
+            // Store current query for export
+            window.currentQuery = result.query;
+        }
+        
+        function clearResults() {
+            document.getElementById('results-table').innerHTML = '';
+            document.getElementById('query-info').innerHTML = '';
+            window.currentQuery = null;
+        }
+        
+        async function exportToCSV() {
+            if (!window.currentQuery) {
+                showError('No query results to export');
+                return;
+            }
+            
+            try {
+                const resultRaw = window.csv_tools.export_to_csv(window.currentQuery);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    downloadFile(result.content, 'query_results.csv', 'text/csv');
+                    showSuccess(`Exported ${result.rows} rows to CSV`);
+                } else {
+                    showError(`Export failed: ${result.error}`);
+                }
+            } catch (error) {
+                showError(`Export failed: ${error.message}`);
+            }
+        }
+        
+        
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        function loadExampleQuery() {
+            const select = document.getElementById('example-queries');
+            const query = select.value;
+            if (query) {
+                window.sqlEditor.setValue(query);
+                select.value = '';
+            }
+        }
+        
+        function removeTable(tableName) {
+            const resultRaw = window.csv_tools.drop_table(tableName);
+            const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+            if (result.success) {
+                updateFileList();
+                showInfo(`Removed table ${tableName}`);
+            } else {
+                showError(`Failed to remove table: ${result.error}`);
+            }
+        }
+        
+        // Utility functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showError(message) {
+            showNotification(message, 'error');
+        }
+        
+        function showSuccess(message) {
+            showNotification(message, 'success');
+        }
+        
+        function showInfo(message) {
+            showNotification(message, 'info');
+        }
+        
+        function showNotification(message, type = 'info') {
+            // Remove existing notifications of the same type
+            const existing = document.querySelectorAll(`.notification.${type}`);
+            existing.forEach(el => el.remove());
+            
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            // Set styling based on type
+            const styles = {
+                error: { backgroundColor: '#e74c3c', color: 'white' },
+                success: { backgroundColor: '#27ae60', color: 'white' },
+                info: { backgroundColor: '#3498db', color: 'white' }
+            };
+            
+            Object.assign(notification.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '15px 20px',
+                borderRadius: '6px',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                zIndex: '1000',
+                maxWidth: '400px',
+                wordWrap: 'break-word',
+                ...styles[type]
+            });
+            
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Auto-remove
+            const timeout = type === 'error' ? 8000 : type === 'success' ? 4000 : 6000;
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, timeout);
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initializePyScript);
+    </script>
+</body>
+</html>
