@@ -115,7 +115,7 @@ class DuckDBCSVTools:
         self.tables = {}
         self.table_counter = 1
     
-    def load_csv_file(self, file_content, filename):
+    def load_csv_file(self, file_content, filename, has_headers=True):
         """Load CSV data into DuckDB table using pure DuckDB"""
         try:
             # Generate table name
@@ -123,9 +123,16 @@ class DuckDBCSVTools:
             self.table_counter += 1
             
             # Use DuckDB's read_csv with direct string content
-            # Create table directly from CSV string using VALUES and UNNEST
             lines = file_content.strip().split('\n')
-            header = lines[0].split(',')
+            
+            if has_headers:
+                header = lines[0].split(',')
+                data_start_line = 1
+            else:
+                # Generate c1, c2, c3... headers
+                first_row = lines[0].split(',')
+                header = [f"c{i+1}" for i in range(len(first_row))]
+                data_start_line = 0
             
             # Clean up header names (remove quotes if present)
             clean_header = [col.strip().strip('"\'') for col in header]
@@ -135,7 +142,7 @@ class DuckDBCSVTools:
             self.conn.execute(f"CREATE TABLE {table_name} ({columns_sql})")
             
             # Insert data row by row
-            for line in lines[1:]:
+            for line in lines[data_start_line:]:
                 if line.strip():  # Skip empty lines
                     # Parse CSV line (basic parsing - handles quoted fields)
                     values = []
@@ -170,15 +177,17 @@ class DuckDBCSVTools:
                 'filename': filename,
                 'rows': row_count,
                 'columns': clean_header,
-                'size': len(file_content)
+                'size': len(file_content),
+                'has_headers': has_headers
             }
             
-            console.log(f"Loaded {filename} as {table_name} with {row_count} rows and {len(clean_header)} columns (pure DuckDB)")
+            console.log(f"Loaded {filename} as {table_name} with {row_count} rows and {len(clean_header)} columns (has_headers: {has_headers})")
             return {
                 'table_name': table_name,
                 'rows': row_count,
                 'columns': clean_header,
-                'success': True
+                'success': True,
+                'has_headers': has_headers
             }
             
         except Exception as e:
@@ -300,6 +309,39 @@ class DuckDBCSVTools:
             return {'success': True}
         except Exception as e:
             console.error(f"Failed to drop table {table_name}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def reload_table_with_headers(self, table_name, file_content, has_headers):
+        """Reload an existing table with different header settings"""
+        try:
+            if table_name not in self.tables:
+                return {'success': False, 'error': 'Table not found'}
+            
+            # Get the original filename
+            filename = self.tables[table_name]['filename']
+            
+            # Drop the existing table
+            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            
+            # Reload with new header setting (keeping same table name)
+            # Temporarily reduce counter since we're reusing the name
+            current_counter = self.table_counter
+            table_num = int(table_name[1:])  # Extract number from 't1', 't2', etc.
+            self.table_counter = table_num
+            
+            result = self.load_csv_file(file_content, filename, has_headers)
+            
+            # Restore counter to continue from where we were
+            self.table_counter = current_counter
+            
+            if result['success']:
+                result['reloaded'] = True
+                console.log(f"Reloaded {table_name} with has_headers={has_headers}")
+            
+            return result
+            
+        except Exception as e:
+            console.error(f"Failed to reload table {table_name}: {str(e)}")
             return {'success': False, 'error': str(e)}
     
     def export_to_csv(self, sql):
@@ -485,6 +527,9 @@ window.csv_tools = csv_tools
             updateFileList();
         }
         
+        // Store file contents for reprocessing
+        window.fileContents = new Map();
+        
         async function processFile(file) {
             try {
                 showInfo(`Processing ${file.name}...`);
@@ -510,9 +555,13 @@ window.csv_tools = csv_tools
                         showError(`Failed to load ${file.name}: ${result.error}`);
                     }
                 } else {
-                    // Process CSV file
+                    // Process CSV file with default headers = true
                     const content = await file.text();
-                    const resultRaw = window.csv_tools.load_csv_file(content, file.name);
+                    
+                    // Store file content for potential reprocessing
+                    window.fileContents.set(file.name, content);
+                    
+                    const resultRaw = window.csv_tools.load_csv_file(content, file.name, true);
                     const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
                     
                     if (result.success) {
@@ -555,6 +604,9 @@ window.csv_tools = csv_tools
             
             let html = '<div class="uploaded-files">';
             for (const [tableName, info] of Object.entries(tableInfo.tables)) {
+                const isCSV = info.filename.toLowerCase().endsWith('.csv');
+                const hasHeaders = info.has_headers !== undefined ? info.has_headers : true;
+                
                 html += `
                     <div class="file-item">
                         <div class="file-info">
@@ -563,6 +615,23 @@ window.csv_tools = csv_tools
                         </div>
                         <div class="file-stats">
                             ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
+                        </div>`;
+                        
+                // Add header toggle for CSV files only
+                if (isCSV) {
+                    html += `
+                        <div class="header-toggle">
+                            <input type="checkbox" id="header-${tableName}" ${hasHeaders ? 'checked' : ''} 
+                                   onchange="toggleHeaders('${tableName}', this.checked)">
+                            <label for="header-${tableName}">File has headers</label>
+                        </div>`;
+                }
+                
+                // Show the actual headers
+                html += `
+                        <div class="file-headers">
+                            <strong>Columns:</strong>
+                            <div class="header-list">${info.columns.join(', ')}</div>
                         </div>
                         <div class="file-actions">
                             <button onclick="removeTable('${tableName}')" class="remove-btn">Remove</button>
@@ -698,10 +767,66 @@ window.csv_tools = csv_tools
             }
         }
         
+        async function toggleHeaders(tableName, hasHeaders) {
+            try {
+                const tableInfoRaw = window.csv_tools.get_table_info();
+                const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfo;
+                const info = tableInfo.tables[tableName];
+                
+                if (!info) {
+                    showError('Table not found');
+                    return;
+                }
+                
+                // Get the stored file content
+                const fileContent = window.fileContents.get(info.filename);
+                if (!fileContent) {
+                    showError('Original file content not available. Please re-upload the file.');
+                    return;
+                }
+                
+                showInfo(`Reloading ${info.filename} with ${hasHeaders ? 'headers' : 'no headers'}...`);
+                
+                // Reload the table with new header setting
+                const resultRaw = window.csv_tools.reload_table_with_headers(tableName, fileContent, hasHeaders);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    updateFileList();
+                    updateSQLEditorWithTables();
+                    showSuccess(`Reloaded ${info.filename} ${hasHeaders ? 'with' : 'without'} headers`);
+                } else {
+                    showError(`Failed to reload table: ${result.error}`);
+                    // Revert checkbox on failure
+                    const checkbox = document.getElementById(`header-${tableName}`);
+                    if (checkbox) {
+                        checkbox.checked = !hasHeaders;
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Header toggle error:', error);
+                showError(`Error toggling headers: ${error.message}`);
+                // Revert checkbox on failure
+                const checkbox = document.getElementById(`header-${tableName}`);
+                if (checkbox) {
+                    checkbox.checked = !hasHeaders;
+                }
+            }
+        }
+        
         function removeTable(tableName) {
             const resultRaw = window.csv_tools.drop_table(tableName);
             const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
             if (result.success) {
+                // Also remove stored file content
+                const tableInfoRaw = window.csv_tools.get_table_info();
+                const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfoRaw;
+                const info = tableInfo.tables[tableName];
+                if (info) {
+                    window.fileContents.delete(info.filename);
+                }
+                
                 updateFileList();
                 showInfo(`Removed table ${tableName}`);
             } else {

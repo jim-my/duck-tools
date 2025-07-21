@@ -72,8 +72,8 @@ h2 {
     border: 2px dashed #3498db;
     border-radius: 8px;
     background: #f8f9fa;
-    min-height: 150px;
-    padding: 20px;
+    min-height: 80px;
+    padding: 15px;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
@@ -146,6 +146,43 @@ h2 {
 
 .file-item button:hover {
     background: #c0392b;
+}
+
+/* Header controls */
+.header-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.header-toggle input[type="checkbox"] {
+    margin: 0;
+}
+
+.header-toggle label {
+    font-size: 0.9em;
+    color: #555;
+}
+
+.file-headers {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+
+.file-headers strong {
+    color: #495057;
+}
+
+.header-list {
+    color: #6c757d;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8em;
+    margin-top: 4px;
 }
 
 /* SQL Editor */

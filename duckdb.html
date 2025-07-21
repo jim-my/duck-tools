@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Tools - DuckDB WASM Version</title>
+    
+    <!-- CodeMirror for SQL editing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    
+    <style>
+        .version-badge {
+            background: #2ecc71;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+        .loading-progress {
+            width: 100%;
+            height: 4px;
+            background: #ecf0f1;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .loading-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>CSV Tools <span class="version-badge">DuckDB WASM</span></h1>
+            <p>Upload CSV/Excel files and query with full SQL - DuckDB-powered</p>
+            <div id="loading-status">Initializing DuckDB WASM...</div>
+            <div class="loading-progress">
+                <div class="loading-bar" id="loading-bar"></div>
+            </div>
+        </header>
+        
+        <div id="upload-section" style="display: none;">
+            <h2>Upload Files</h2>
+            <div id="dropzone" class="dropzone">
+                <div class="dz-message">
+                    <strong>Drop CSV files here or click to upload</strong>
+                    <span class="note">(Supports .csv files - Max size: 50MB)</span>
+                </div>
+            </div>
+            <div id="file-list"></div>
+        </div>
+        
+        <div id="query-section" style="display: none;">
+            <h2>SQL Query</h2>
+            <div id="sql-editor"></div>
+            <div class="query-controls">
+                <button id="run-query">Run Query</button>
+                <span class="shortcut-hint">Ctrl+Enter to run</span>
+                <div class="query-examples">
+                    <select id="example-queries">
+                        <option value="">Load example query...</option>
+                        <option value="SELECT * FROM t1 LIMIT 10;">Basic SELECT</option>
+                        <option value="SELECT column, COUNT(*) as count FROM t1 GROUP BY column ORDER BY count DESC;">Group By Count</option>
+                        <option value="SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;">Inner Join</option>
+                        <option value="SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY value DESC) as rank FROM t1;">Window Function</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div id="results-section" style="display: none;">
+            <h2>Results</h2>
+            <div id="query-info" class="query-info"></div>
+            <div id="results-table"></div>
+            <div class="export-controls">
+                <button id="export-csv">Export as CSV</button>
+            </div>
+        </div>
+        
+        <div id="error-container"></div>
+    </div>
+    
+    <script type="module">
+        import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
+        
+        let db, conn;
+        let tables = {};
+        let tableCounter = 1;
+        
+        // Initialize DuckDB WASM
+        async function initializeDuckDB() {
+            try {
+                updateLoadingStatus("Loading DuckDB WASM runtime...", 20);
+                
+                // Bundle configuration with jsdelivr CDN
+                const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+                
+                updateLoadingStatus("Creating DuckDB worker...", 40);
+                
+                // Create worker with CORS-friendly approach
+                const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+                const worker_url = URL.createObjectURL(
+                    new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
+                );
+                const worker = new Worker(worker_url);
+                
+                updateLoadingStatus("Initializing database...", 60);
+                
+                // Initialize logger and database
+                const logger = new duckdb.ConsoleLogger();
+                db = new duckdb.AsyncDuckDB(logger, worker);
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+                
+                updateLoadingStatus("Creating connection...", 80);
+                
+                // Create connection
+                conn = await db.connect();
+                
+                updateLoadingStatus("Ready!", 100);
+                
+                console.log('DuckDB WASM initialized successfully');
+                
+                // Initialize UI
+                setTimeout(() => {
+                    initializeUI();
+                }, 500);
+                
+            } catch (error) {
+                console.error('Failed to initialize DuckDB:', error);
+                showError(`DuckDB initialization failed: ${error.message}`);
+            }
+        }
+        
+        function updateLoadingStatus(message, progress = 0) {
+            const statusElement = document.getElementById('loading-status');
+            const progressBar = document.getElementById('loading-bar');
+            
+            if (statusElement) {
+                statusElement.textContent = message;
+            }
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+            }
+        }
+        
+        function initializeUI() {
+            // Hide loading and show main sections
+            document.getElementById('loading-status').style.display = 'none';
+            document.querySelector('.loading-progress').style.display = 'none';
+            document.getElementById('upload-section').style.display = 'block';
+            document.getElementById('query-section').style.display = 'block';
+            document.getElementById('results-section').style.display = 'block';
+            
+            // Initialize SQL editor
+            initializeSQLEditor();
+            
+            // Initialize file upload
+            initializeFileUpload();
+            
+            // Initialize event listeners
+            initializeEventListeners();
+            
+            console.log('DuckDB CSV Tools ready!');
+        }
+        
+        function initializeSQLEditor() {
+            window.sqlEditor = CodeMirror(document.getElementById('sql-editor'), {
+                mode: 'text/x-sql',
+                theme: 'default',
+                lineNumbers: true,
+                autoCloseBrackets: true,
+                matchBrackets: true,
+                indentUnit: 2,
+                lineWrapping: true,
+                value: '-- Welcome to CSV Tools with DuckDB WASM!\n-- Upload some CSV files and start querying\n\nSELECT * FROM t1 LIMIT 10;'
+            });
+        }
+        
+        function initializeFileUpload() {
+            const dropzone = document.getElementById('dropzone');
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.csv';
+            fileInput.multiple = true;
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+            
+            dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('dragover', handleDragOver);
+            dropzone.addEventListener('drop', handleDrop);
+            dropzone.addEventListener('dragenter', handleDragEnter);
+            dropzone.addEventListener('dragleave', handleDragLeave);
+            
+            fileInput.addEventListener('change', handleFileSelect);
+        }
+        
+        function initializeEventListeners() {
+            document.getElementById('run-query').addEventListener('click', executeQuery);
+            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+            document.getElementById('example-queries').addEventListener('change', loadExampleQuery);
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    executeQuery();
+                }
+            });
+        }
+        
+        // File handling functions
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragEnter(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            processFiles(files);
+        }
+        
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            processFiles(files);
+            e.target.value = '';
+        }
+        
+        async function processFiles(files) {
+            for (const file of files) {
+                await processFile(file);
+            }
+            updateFileList();
+        }
+        
+        async function processFile(file) {
+            try {
+                showInfo(`Processing ${file.name}...`);
+                
+                if (!file.name.toLowerCase().endsWith('.csv')) {
+                    showError(`${file.name} is not a CSV file. Only CSV files are supported.`);
+                    return;
+                }
+                
+                // Generate table name
+                const tableName = `t${tableCounter}`;
+                tableCounter++;
+                
+                // Read file content
+                const content = await file.text();
+                
+                // Register CSV with DuckDB
+                await db.registerFileText(file.name, content);
+                
+                // Create table from CSV
+                const createQuery = `CREATE TABLE ${tableName} AS SELECT * FROM read_csv('${file.name}', AUTO_DETECT=TRUE)`;
+                await conn.query(createQuery);
+                
+                // Get table info
+                const infoResult = await conn.query(`DESCRIBE ${tableName}`);
+                const columns = infoResult.toArray().map(row => row.column_name);
+                
+                const countResult = await conn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+                const rowCount = countResult.toArray()[0].count;
+                
+                // Store metadata
+                tables[tableName] = {
+                    filename: file.name,
+                    rows: Number(rowCount),
+                    columns: columns,
+                    size: file.size
+                };
+                
+                showSuccess(`Loaded ${file.name} as ${tableName} (${rowCount} rows, ${columns.length} columns)`);
+                updateSQLEditorWithTables();
+                
+            } catch (error) {
+                console.error('File processing error:', error);
+                showError(`Error processing ${file.name}: ${error.message}`);
+            }
+        }
+        
+        function updateSQLEditorWithTables() {
+            const tableNames = Object.keys(tables);
+            
+            if (tableNames.length > 0) {
+                const comment = `-- Available tables: ${tableNames.join(', ')}\\n\\n`;
+                const currentValue = window.sqlEditor.getValue();
+                if (!currentValue.includes('Available tables:')) {
+                    window.sqlEditor.setValue(comment + currentValue);
+                }
+            }
+        }
+        
+        function updateFileList() {
+            const fileListContainer = document.getElementById('file-list');
+            
+            if (Object.keys(tables).length === 0) {
+                fileListContainer.innerHTML = '<p class="no-files">No files loaded yet</p>';
+                return;
+            }
+            
+            let html = '<div class="uploaded-files">';
+            for (const [tableName, info] of Object.entries(tables)) {
+                html += `
+                    <div class="file-item">
+                        <div class="file-info">
+                            <span class="file-name">${info.filename}</span>
+                            <span class="table-alias">→ ${tableName}</span>
+                        </div>
+                        <div class="file-stats">
+                            ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
+                        </div>
+                        <div class="file-actions">
+                            <button onclick="removeTable('${tableName}')" class="remove-btn">Remove</button>
+                        </div>
+                    </div>`;
+            }
+            html += '</div>';
+            fileListContainer.innerHTML = html;
+        }
+        
+        async function executeQuery() {
+            try {
+                const sql = window.sqlEditor.getValue().trim();
+                if (!sql) {
+                    showError('Please enter a SQL query');
+                    return;
+                }
+                
+                showInfo('Executing query...');
+                
+                const result = await conn.query(sql);
+                const data = result.toArray();
+                const columns = result.schema.fields.map(field => field.name);
+                
+                displayResults({
+                    data: data,
+                    columns: columns,
+                    rows: data.length,
+                    query: sql
+                });
+                
+                showSuccess(`Query executed: ${data.length} rows returned`);
+                
+            } catch (error) {
+                console.error('Query execution error:', error);
+                showError(`Query failed: ${error.message}`);
+                clearResults();
+            }
+        }
+        
+        function displayResults(result) {
+            const resultsContainer = document.getElementById('results-table');
+            const queryInfo = document.getElementById('query-info');
+            
+            // Show query info
+            queryInfo.innerHTML = `
+                <div class="query-summary">
+                    <strong>${result.rows.toLocaleString()}</strong> rows, 
+                    <strong>${result.columns.length}</strong> columns
+                </div>
+            `;
+            
+            if (result.rows === 0) {
+                resultsContainer.innerHTML = '<p class="no-results">Query returned no results</p>';
+                return;
+            }
+            
+            // Create table
+            let html = '<table class="results-table"><thead><tr>';
+            result.columns.forEach(col => {
+                html += `<th>${escapeHtml(col)}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            
+            // Show first 1000 rows
+            const displayRows = result.data.slice(0, 1000);
+            displayRows.forEach(row => {
+                html += '<tr>';
+                result.columns.forEach(col => {
+                    const value = row[col];
+                    html += `<td>${escapeHtml(String(value ?? ''))}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            if (result.rows > 1000) {
+                html += `<p class="display-note">Showing first 1,000 rows of ${result.rows.toLocaleString()} total rows. Use LIMIT in your query or export for full results.</p>`;
+            }
+            
+            resultsContainer.innerHTML = html;
+            
+            // Store current query for export
+            window.currentQuery = result.query;
+        }
+        
+        function clearResults() {
+            document.getElementById('results-table').innerHTML = '';
+            document.getElementById('query-info').innerHTML = '';
+            window.currentQuery = null;
+        }
+        
+        async function exportToCSV() {
+            if (!window.currentQuery) {
+                showError('No query results to export');
+                return;
+            }
+            
+            try {
+                const result = await conn.query(window.currentQuery);
+                const csvContent = result.toCSV();
+                
+                downloadFile(csvContent, 'query_results.csv', 'text/csv');
+                showSuccess(`Exported ${result.numRows} rows to CSV`);
+                
+            } catch (error) {
+                showError(`Export failed: ${error.message}`);
+            }
+        }
+        
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        function loadExampleQuery() {
+            const select = document.getElementById('example-queries');
+            const query = select.value;
+            if (query) {
+                window.sqlEditor.setValue(query);
+                select.value = '';
+            }
+        }
+        
+        window.removeTable = async function(tableName) {
+            try {
+                await conn.query(`DROP TABLE IF EXISTS ${tableName}`);
+                delete tables[tableName];
+                updateFileList();
+                showInfo(`Removed table ${tableName}`);
+            } catch (error) {
+                showError(`Failed to remove table: ${error.message}`);
+            }
+        }
+        
+        // Utility functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showError(message) {
+            showNotification(message, 'error');
+        }
+        
+        function showSuccess(message) {
+            showNotification(message, 'success');
+        }
+        
+        function showInfo(message) {
+            showNotification(message, 'info');
+        }
+        
+        function showNotification(message, type = 'info') {
+            // Remove existing notifications of the same type
+            const existing = document.querySelectorAll(`.notification.${type}`);
+            existing.forEach(el => el.remove());
+            
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            // Set styling based on type
+            const styles = {
+                error: { backgroundColor: '#e74c3c', color: 'white' },
+                success: { backgroundColor: '#27ae60', color: 'white' },
+                info: { backgroundColor: '#3498db', color: 'white' }
+            };
+            
+            Object.assign(notification.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '15px 20px',
+                borderRadius: '6px',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                zIndex: '1000',
+                maxWidth: '400px',
+                wordWrap: 'break-word',
+                ...styles[type]
+            });
+            
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Auto-remove
+            const timeout = type === 'error' ? 8000 : type === 'success' ? 4000 : 6000;
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, timeout);
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initializeDuckDB);
+    </script>
+</body>
+</html>
