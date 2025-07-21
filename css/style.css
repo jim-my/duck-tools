@@ -185,6 +185,38 @@ h2 {
     margin-top: 4px;
 }
 
+/* Sheet selector for Excel files */
+.sheet-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.sheet-selector label {
+    font-size: 0.9em;
+    color: #555;
+}
+
+.sheet-selector select {
+    padding: 4px 8px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: white;
+    font-size: 0.9em;
+    min-width: 120px;
+}
+
+.sheet-info {
+    margin-top: 8px;
+}
+
+.sheet-name {
+    font-size: 0.9em;
+    color: #6c757d;
+    font-style: italic;
+}
+
 /* SQL Editor */
 #sql-editor {
     border: 1px solid #dee2e6;

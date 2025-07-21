@@ -109,10 +109,10 @@ class DuckDBCSVTools:
         
         # Install and load Excel extension
         try:
-            # console.log("Attempting to install Excel extension...")
-            # self.conn.execute("INSTALL excel")
-            # console.log("Excel extension installed, loading...")
-            # self.conn.execute("LOAD excel")
+            console.log("Attempting to install Excel extension...")
+            self.conn.execute("INSTALL excel")
+            console.log("Excel extension installed, loading...")
+            self.conn.execute("LOAD excel")
             
             # Test if Excel extension is working
             console.log("Testing Excel extension functionality...")
@@ -121,7 +121,7 @@ class DuckDBCSVTools:
                 self.excel_extension_available = True
                 console.log("DuckDB with Excel support initialized successfully")
             else:
-                console.log("Excel extension installed but not found in extensions list")
+                console.log("Excel extension installed but not found in extensions list - will use pandas fallback")
                 
         except Exception as e:
             console.error(f"Excel extension initialization failed: {e}")
@@ -226,7 +226,8 @@ class DuckDBCSVTools:
             self.table_counter += 1
             
             if not self.excel_extension_available:
-                console.log("Excel extension not available, using fallback method")
+                console.log("Excel extension not available, using pandas fallback method")
+                console.log(f"Calling load_excel_fallback with {len(file_bytes)} bytes for {filename}")
                 return self.load_excel_fallback(file_bytes, filename, table_name)
             
             try:
@@ -396,7 +397,7 @@ class DuckDBCSVTools:
                 columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
                 columns = [row[0] for row in columns_result]
                 
-                # Store metadata
+                # Store metadata including sheet information
                 self.tables[table_name] = {
                     'filename': filename,
                     'rows': row_count,
@@ -405,7 +406,10 @@ class DuckDBCSVTools:
                     'has_headers': True,
                     'file_type': 'excel',
                     'processing_method': 'pandas_fallback',
-                    'dataframe_name': f'{table_name}_df'  # Store for cleanup
+                    'dataframe_name': f'{table_name}_df',  # Store for cleanup
+                    'available_sheets': sheet_names if 'sheet_names' in locals() else ['Sheet1'],
+                    'current_sheet': first_sheet if 'first_sheet' in locals() else 'Sheet1',
+                    'excel_buffer': file_bytes  # Store original bytes for loading other sheets
                 }
                 
                 console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
@@ -512,6 +516,86 @@ class DuckDBCSVTools:
             
         except Exception as e:
             console.error(f"Failed to load Excel sheet: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def switch_excel_sheet(self, table_name, sheet_name):
+        """Switch to a different sheet for an existing Excel file"""
+        try:
+            if table_name not in self.tables:
+                return {'success': False, 'error': 'Table not found'}
+            
+            table_info = self.tables[table_name]
+            if table_info.get('file_type') != 'excel':
+                return {'success': False, 'error': 'Not an Excel file'}
+            
+            available_sheets = table_info.get('available_sheets', [])
+            if sheet_name not in available_sheets:
+                return {'success': False, 'error': f'Sheet "{sheet_name}" not found. Available sheets: {", ".join(available_sheets)}'}
+            
+            console.log(f"Switching {table_name} to sheet: {sheet_name}")
+            
+            # Get the original file bytes
+            file_bytes = table_info.get('excel_buffer')
+            if not file_bytes:
+                return {'success': False, 'error': 'Original file data not available'}
+            
+            # Clean up existing DataFrame and view
+            old_df_name = table_info.get('dataframe_name')
+            if old_df_name:
+                try:
+                    self.conn.unregister(old_df_name)
+                except:
+                    pass
+            
+            try:
+                self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+            except:
+                pass
+            
+            # Load the new sheet using pandas
+            excel_buffer = io.BytesIO(file_bytes)
+            df = pd.read_excel(excel_buffer, sheet_name=sheet_name, engine='openpyxl')
+            
+            console.log(f"Loaded sheet '{sheet_name}': {df.shape[0]} rows, {df.shape[1]} columns")
+            
+            # Clean up column names
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            # Register new DataFrame and create view
+            new_df_name = f'{table_name}_df'
+            self.conn.register(new_df_name, df)
+            self.conn.execute(f"""
+                CREATE VIEW {table_name} AS 
+                SELECT * FROM {new_df_name}
+            """)
+            
+            # Update metadata
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            # Update table info
+            table_info.update({
+                'rows': row_count,
+                'columns': columns,
+                'current_sheet': sheet_name,
+                'dataframe_name': new_df_name
+            })
+            
+            console.log(f"Successfully switched to sheet '{sheet_name}' with {row_count} rows")
+            
+            return {
+                'success': True,
+                'table_name': table_name,
+                'sheet_name': sheet_name,
+                'rows': row_count,
+                'columns': columns
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to switch Excel sheet: {str(e)}")
             return {'success': False, 'error': str(e)}
     
     def list_excel_sheets(self, file_content, filename):
@@ -969,6 +1053,7 @@ window.csv_tools = csv_tools
             let html = '<div class="uploaded-files">';
             for (const [tableName, info] of Object.entries(tableInfo.tables)) {
                 const isCSV = info.filename.toLowerCase().endsWith('.csv');
+                const isExcel = info.file_type === 'excel';
                 const hasHeaders = info.has_headers !== undefined ? info.has_headers : true;
                 
                 html += `
@@ -988,6 +1073,31 @@ window.csv_tools = csv_tools
                             <input type="checkbox" id="header-${tableName}" ${hasHeaders ? 'checked' : ''} 
                                    onchange="toggleHeaders('${tableName}', this.checked)">
                             <label for="header-${tableName}">File has headers</label>
+                        </div>`;
+                }
+                
+                // Add sheet selector for Excel files with multiple sheets
+                if (isExcel && info.available_sheets && info.available_sheets.length > 1) {
+                    const currentSheet = info.current_sheet || info.available_sheets[0];
+                    html += `
+                        <div class="sheet-selector">
+                            <label for="sheet-${tableName}">Sheet:</label>
+                            <select id="sheet-${tableName}" onchange="switchSheet('${tableName}', this.value)">`;
+                    
+                    info.available_sheets.forEach(sheetName => {
+                        const selected = sheetName === currentSheet ? 'selected' : '';
+                        html += `<option value="${sheetName}" ${selected}>${sheetName}</option>`;
+                    });
+                    
+                    html += `
+                            </select>
+                        </div>`;
+                } else if (isExcel) {
+                    // Show current sheet info even if only one sheet
+                    const currentSheet = info.current_sheet || 'Sheet1';
+                    html += `
+                        <div class="sheet-info">
+                            <span class="sheet-name">Sheet: ${currentSheet}</span>
                         </div>`;
                 }
                 
@@ -1176,6 +1286,27 @@ window.csv_tools = csv_tools
                 if (checkbox) {
                     checkbox.checked = !hasHeaders;
                 }
+            }
+        }
+        
+        async function switchSheet(tableName, sheetName) {
+            try {
+                showInfo(`Switching to sheet: ${sheetName}...`);
+                
+                const resultRaw = window.csv_tools.switch_excel_sheet(tableName, sheetName);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    updateFileList();
+                    updateSQLEditorWithTables();
+                    showSuccess(`Switched to sheet "${sheetName}" (${result.rows} rows, ${result.columns.length} columns)`);
+                } else {
+                    showError(`Failed to switch sheet: ${result.error}`);
+                }
+                
+            } catch (error) {
+                console.error('Sheet switching error:', error);
+                showError(`Error switching sheet: ${error.message}`);
             }
         }
         
