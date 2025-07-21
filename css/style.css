@@ -369,6 +369,11 @@ h2 {
     margin-top: 15px;
 }
 
+/* Hide PyScript deprecation warnings */
+.py-error {
+    display: none !important;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     body {
