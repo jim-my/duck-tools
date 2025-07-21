@@ -211,7 +211,7 @@ class DuckDBCSVTools:
             return {'success': False, 'error': str(e)}
     
     def load_excel_file(self, file_content, filename):
-        """Load Excel data into DuckDB table using official Excel extension or fallback"""
+        """Load Excel data into DuckDB using native read_xlsx with view alias"""
         try:
             console.log(f"Starting Excel file processing for {filename}")
             console.log(f"Excel extension available: {self.excel_extension_available}")
@@ -231,79 +231,95 @@ class DuckDBCSVTools:
             try:
                 # Write to a temporary file that DuckDB can access
                 temp_path = f"/tmp/{filename}"
-                console.log(f"Writing file to virtual filesystem at {temp_path}")
+                console.log(f"Writing Excel file to virtual filesystem at {temp_path}")
                 
                 # Write the file to the virtual filesystem
                 with open(temp_path, 'wb') as f:
                     f.write(file_bytes)
                 
-                console.log(f"File written successfully, attempting to read with DuckDB Excel extension...")
+                console.log(f"File written successfully, creating view with DuckDB Excel extension...")
                 
-                # Try different Excel reading approaches
+                # Try different Excel reading approaches with VIEW creation
                 success = False
                 
-                # Approach 1: Basic read_xlsx
+                # Approach 1: Basic read_xlsx as VIEW
                 try:
-                    console.log("Trying basic read_xlsx...")
+                    console.log("Trying basic read_xlsx view...")
                     self.conn.execute(f"""
-                        CREATE TABLE {table_name} AS 
+                        CREATE VIEW {table_name} AS 
                         SELECT * FROM read_xlsx('{temp_path}')
                     """)
                     success = True
-                    console.log("Basic read_xlsx succeeded")
+                    console.log("Basic read_xlsx view succeeded")
                 except Exception as e1:
-                    console.log(f"Basic read_xlsx failed: {e1}")
+                    console.log(f"Basic read_xlsx view failed: {e1}")
                 
                 # Approach 2: With header specification
                 if not success:
                     try:
-                        console.log("Trying read_xlsx with header=true...")
+                        console.log("Trying read_xlsx view with header=true...")
                         self.conn.execute(f"""
-                            CREATE TABLE {table_name} AS 
+                            CREATE VIEW {table_name} AS 
                             SELECT * FROM read_xlsx('{temp_path}', header=true)
                         """)
                         success = True
-                        console.log("read_xlsx with header succeeded")
+                        console.log("read_xlsx view with header succeeded")
                     except Exception as e2:
-                        console.log(f"read_xlsx with header failed: {e2}")
+                        console.log(f"read_xlsx view with header failed: {e2}")
                 
-                # Approach 3: With all_varchar
+                # Approach 3: With all_varchar for problematic files
                 if not success:
                     try:
-                        console.log("Trying read_xlsx with all_varchar=true...")
+                        console.log("Trying read_xlsx view with all_varchar=true...")
                         self.conn.execute(f"""
-                            CREATE TABLE {table_name} AS 
+                            CREATE VIEW {table_name} AS 
                             SELECT * FROM read_xlsx('{temp_path}', all_varchar=true)
                         """)
                         success = True
-                        console.log("read_xlsx with all_varchar succeeded")
+                        console.log("read_xlsx view with all_varchar succeeded")
                     except Exception as e3:
-                        console.log(f"read_xlsx with all_varchar failed: {e3}")
+                        console.log(f"read_xlsx view with all_varchar failed: {e3}")
+                
+                # Approach 4: Try with sheet name specification for multi-sheet files
+                if not success:
+                    try:
+                        console.log("Trying read_xlsx view with first sheet...")
+                        self.conn.execute(f"""
+                            CREATE VIEW {table_name} AS 
+                            SELECT * FROM read_xlsx('{temp_path}', sheet_name=0)
+                        """)
+                        success = True
+                        console.log("read_xlsx view with sheet_name=0 succeeded")
+                    except Exception as e4:
+                        console.log(f"read_xlsx view with sheet_name failed: {e4}")
                         # If all DuckDB approaches fail, try fallback
                         console.log("All DuckDB Excel approaches failed, trying fallback...")
                         return self.load_excel_fallback(file_bytes, filename, table_name)
                 
                 if success:
-                    console.log(f"Table {table_name} created successfully with DuckDB Excel extension")
+                    console.log(f"View {table_name} created successfully with DuckDB Excel extension")
                     
-                    # Get table info
+                    # Get view info
                     count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
                     row_count = count_result[0]
-                    console.log(f"Table has {row_count} rows")
+                    console.log(f"View has {row_count} rows")
                     
                     columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
                     columns = [row[0] for row in columns_result]
-                    console.log(f"Table has columns: {columns}")
+                    console.log(f"View has columns: {columns}")
                     
+                    # Store metadata
                     self.tables[table_name] = {
                         'filename': filename,
                         'rows': row_count,
                         'columns': columns,
                         'size': len(file_bytes),
-                        'has_headers': True
+                        'has_headers': True,  # Excel files typically have headers
+                        'temp_path': temp_path,  # Store for cleanup
+                        'file_type': 'excel'  # Mark as Excel for proper cleanup
                     }
                     
-                    console.log(f"Successfully loaded Excel {filename} as {table_name} with {row_count} rows and {len(columns)} columns")
+                    console.log(f"Successfully loaded Excel {filename} as view {table_name} with {row_count} rows and {len(columns)} columns")
                     return {
                         'success': True,
                         'table_name': table_name,
@@ -336,6 +352,80 @@ class DuckDBCSVTools:
         except Exception as e:
             console.error(f"Fallback Excel processing failed: {e}")
             return {'success': False, 'error': f'Excel processing failed: {str(e)}'}
+    
+    def load_excel_sheet(self, filename, sheet_name_or_index):
+        """Load a specific sheet from an Excel file"""
+        try:
+            if not self.excel_extension_available:
+                return {'success': False, 'error': 'Excel extension not available'}
+            
+            # Find the Excel file
+            excel_table = None
+            temp_path = None
+            for table_name, info in self.tables.items():
+                if info['filename'] == filename and info.get('file_type') == 'excel':
+                    temp_path = info.get('temp_path')
+                    break
+            
+            if not temp_path:
+                return {'success': False, 'error': f'Excel file {filename} not found'}
+            
+            # Generate new table name
+            table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            console.log(f"Loading sheet '{sheet_name_or_index}' from {filename} as {table_name}")
+            
+            # Create view for specific sheet
+            try:
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_xlsx('{temp_path}', sheet_name='{sheet_name_or_index}')
+                """)
+                console.log(f"Successfully loaded sheet '{sheet_name_or_index}'")
+            except:
+                # Try with numeric index if name failed
+                try:
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM read_xlsx('{temp_path}', sheet_name={sheet_name_or_index})
+                    """)
+                    console.log(f"Successfully loaded sheet index {sheet_name_or_index}")
+                except Exception as e:
+                    console.error(f"Failed to load sheet: {e}")
+                    return {'success': False, 'error': f'Failed to load sheet: {str(e)}'}
+            
+            # Get view info
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            # Store metadata
+            self.tables[table_name] = {
+                'filename': f"{filename} (Sheet: {sheet_name_or_index})",
+                'rows': row_count,
+                'columns': columns,
+                'size': 0,  # Unknown for individual sheets
+                'has_headers': True,
+                'temp_path': temp_path,  # Same file, different sheet
+                'file_type': 'excel',
+                'sheet': sheet_name_or_index
+            }
+            
+            console.log(f"Successfully loaded sheet '{sheet_name_or_index}' as {table_name}")
+            return {
+                'success': True,
+                'table_name': table_name,
+                'rows': row_count,
+                'columns': columns,
+                'sheet': sheet_name_or_index
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load Excel sheet: {str(e)}")
+            return {'success': False, 'error': str(e)}
     
     def list_excel_sheets(self, file_content, filename):
         """List all sheets in an Excel file"""
@@ -409,15 +499,11 @@ class DuckDBCSVTools:
         }
     
     def drop_table(self, table_name):
-        """Drop a table/view from DuckDB"""
+        """Drop a table/view from DuckDB with proper cleanup"""
         try:
-            # Try to drop as view first (for CSV files), then as table (for Excel files)
-            try:
-                self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
-                console.log(f"Dropped view {table_name}")
-            except:
-                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                console.log(f"Dropped table {table_name}")
+            # Both CSV and Excel files now use views, so drop as view
+            self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+            console.log(f"Dropped view {table_name}")
             
             # Clean up temporary file if it exists
             if table_name in self.tables and 'temp_path' in self.tables[table_name]:
@@ -434,10 +520,10 @@ class DuckDBCSVTools:
             if table_name in self.tables:
                 del self.tables[table_name]
                 
-            console.log(f"Successfully removed {table_name}")
+            console.log(f"Successfully removed view {table_name}")
             return {'success': True}
         except Exception as e:
-            console.error(f"Failed to drop {table_name}: {str(e)}")
+            console.error(f"Failed to drop view {table_name}: {str(e)}")
             return {'success': False, 'error': str(e)}
     
     def reload_table_with_headers(self, table_name, file_content, has_headers):
