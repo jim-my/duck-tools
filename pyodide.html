@@ -108,10 +108,10 @@ class DuckDBCSVTools:
         
         # Install and load Excel extension
         try:
-            console.log("Attempting to install Excel extension...")
-            self.conn.execute("INSTALL excel")
-            console.log("Excel extension installed, loading...")
-            self.conn.execute("LOAD excel")
+            # console.log("Attempting to install Excel extension...")
+            # self.conn.execute("INSTALL excel")
+            # console.log("Excel extension installed, loading...")
+            # self.conn.execute("LOAD excel")
             
             # Test if Excel extension is working
             console.log("Testing Excel extension functionality...")
@@ -645,8 +645,8 @@ window.csv_tools = csv_tools
             try {
                 showInfo(`Processing ${file.name}...`);
                 
-                const isExcel = file.name.match(/\\.xlsx$/i);
-                const isOldExcel = file.name.match(/\\.xls$/i);
+                const isExcel = file.name.match(/\.xlsx$/i);
+                const isOldExcel = file.name.match(/\.xls$/i);
                 
                 if (isOldExcel) {
                     // Handle old .xls format (not supported by DuckDB)
