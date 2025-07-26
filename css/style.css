@@ -121,7 +121,7 @@ h2 {
 .file-item {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: stretch;
     padding: 15px;
     margin-bottom: 10px;
     background: #f8f9fa;
@@ -253,7 +253,7 @@ h2 {
 }
 
 .file-actions {
-    margin-top: 0; /* Adjusted margin */
+    margin-top: auto; /* Adjusted margin */
 }
 
 /* SQL Editor */
