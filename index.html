@@ -1269,8 +1269,8 @@ window.csv_tools = csv_tools
                 html += `
                     <div class="file-item">
                         <div class="file-info">
-                            <span class="file-name">${info.filename}</span>
-                            <span class="table-alias">→ ${tableName}</span>
+                            <span class="table-alias">${tableName}</span>
+                            <span class="file-name">→ ${info.filename}</span>
                         </div>
                         <div class="file-stats">
                             ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
