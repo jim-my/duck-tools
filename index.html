@@ -1302,12 +1302,13 @@ window.csv_tools = csv_tools
                 if (isExcel && info.available_sheets && info.available_sheets.length > 1) {
                     const currentSheet = info.current_sheet || info.sheet_name || info.available_sheets[0];
                     const unloadedSheets = info.available_sheets.filter(sheetName => {
-                            // Check if this sheet is already loaded
-                            const originalFilename = info.original_filename;
+                        // Check if this sheet is already loaded
+                        const currentFileOriginalName = info.original_filename || info.filename; // Fallback for older entries
                         for (const [otherTableName, otherInfo] of Object.entries(tableInfo.tables)) {
+                            const otherFileOriginalName = otherInfo.original_filename || otherInfo.filename;
                             if (otherInfo.file_type === 'excel' && 
-                                    otherInfo.original_filename === originalFilename &&
-                                    (otherInfo.sheet_name === sheetName || otherInfo.current_sheet === sheetName)) {
+                                otherFileOriginalName === currentFileOriginalName &&
+                                (otherInfo.sheet_name === sheetName || otherInfo.current_sheet === sheetName)) {
                                 return false; // Already loaded
                             }
                         }
@@ -1333,6 +1334,16 @@ window.csv_tools = csv_tools
                         });
                         
                         html += `
+                                </select>
+                            </div>`;
+                    } else {
+                        html += `
+                            <div class="additional-sheets">
+                                <label for="additional-sheet-${tableName}">
+                                    Load additional sheet:
+                                </label>
+                                <select id="additional-sheet-${tableName}" disabled>
+                                    <option value="">No more sheets</option>
                                 </select>
                             </div>`;
                     }
