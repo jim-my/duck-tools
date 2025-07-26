@@ -287,6 +287,7 @@ class DuckDBCSVTools:
                     # Store metadata
                     self.tables[table_name] = {
                         'filename': filename,
+                        'original_filename': filename,
                         'rows': row_count,
                         'columns': columns,
                         'size': len(file_bytes),
@@ -525,14 +526,15 @@ class DuckDBCSVTools:
             
             # Store metadata
             self.tables[table_name] = {
-                'filename': f"{filename} (Sheet: {sheet_name_or_index})",
+                'filename': filename,
+                'original_filename': filename,
                 'rows': row_count,
                 'columns': columns,
                 'size': 0,  # Unknown for individual sheets
                 'has_headers': True,
                 'temp_path': temp_path,  # Same file, different sheet
                 'file_type': 'excel',
-                'sheet': sheet_name_or_index
+                'sheet_name': sheet_name_or_index
             }
             
             console.log(f"Successfully loaded sheet '{sheet_name_or_index}' as {table_name}")
@@ -609,7 +611,7 @@ class DuckDBCSVTools:
             
             # Store metadata
             self.tables[new_table_name] = {
-                'filename': f"{base_info['filename']} (Sheet: {sheet_name})",
+                'filename': base_info['filename'],
                 'rows': row_count,
                 'columns': columns,
                 'size': len(file_bytes),
@@ -1265,13 +1267,16 @@ window.csv_tools = csv_tools
                 const isCSV = info.filename.toLowerCase().endsWith('.csv');
                 const isExcel = info.file_type === 'excel';
                 const hasHeaders = info.has_headers !== undefined ? info.has_headers : true;
+
+                // Determine the filename to display
+                const displayFilename = isExcel && info.original_filename ? info.original_filename : info.filename;
                 
                 html += `
                     <div class="file-item">
                         <div class="file-details">
                             <div class="file-info">
                                 <span class="table-alias">${tableName}</span>
-                                <span class="file-name">→ ${info.filename}</span>
+                                <span class="file-name">→ ${displayFilename}</span>
                             </div>
                             <div class="file-stats">
                                 ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
