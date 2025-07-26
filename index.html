@@ -1268,13 +1268,20 @@ window.csv_tools = csv_tools
                 
                 html += `
                     <div class="file-item">
-                        <div class="file-info">
-                            <span class="table-alias">${tableName}</span>
-                            <span class="file-name">→ ${info.filename}</span>
+                        <div class="file-details">
+                            <div class="file-info">
+                                <span class="table-alias">${tableName}</span>
+                                <span class="file-name">→ ${info.filename}</span>
+                            </div>
+                            <div class="file-stats">
+                                ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
+                            </div>
+                            <div class="file-headers">
+                                <strong>Columns:</strong>
+                                <div class="header-list">${info.columns.join(', ')}</div>
+                            </div>
                         </div>
-                        <div class="file-stats">
-                            ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
-                        </div>`;
+                        <div class="file-controls">`;
                         
                 // Add header toggle for CSV files only
                 if (isCSV) {
@@ -1311,10 +1318,10 @@ window.csv_tools = csv_tools
                     if (unloadedSheets.length > 0) {
                         html += `
                             <div class="additional-sheets">
-                                <label for="additional-sheet-${tableName}" style="font-size: 12px; color: #666;">
+                                <label for="additional-sheet-${tableName}">
                                     Load additional sheet:
                                 </label>
-                                <select id="additional-sheet-${tableName}" style="margin-left: 5px; font-size: 12px;" onchange="loadAdditionalSheet('${tableName}', this.value)">
+                                <select id="additional-sheet-${tableName}" onchange="loadAdditionalSheet('${tableName}', this.value)">
                                     <option value="">Choose sheet...</option>`;
                         
                         unloadedSheets.forEach(sheetName => {
@@ -1336,12 +1343,9 @@ window.csv_tools = csv_tools
                 
                 // Show the actual headers
                 html += `
-                        <div class="file-headers">
-                            <strong>Columns:</strong>
-                            <div class="header-list">${info.columns.join(', ')}</div>
-                        </div>
-                        <div class="file-actions">
-                            <button onclick="removeTable('${tableName}')" class="remove-btn">Remove</button>
+                            <div class="file-actions">
+                                <button onclick="removeTable('${tableName}')" class="remove-btn">Remove</button>
+                            </div>
                         </div>
                     </div>`;
             }
