@@ -3,138 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSV Tools - DuckDB WASM</title>
-    
+    <title>CSV/Excel Transformation tools - Join files using SQL directly</title>
     
     <!-- CodeMirror for SQL editing -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
     
-    <!-- Simple CSV Processing (No External Dependencies) -->
-    <script>
-        // Simple CSV Tools without DuckDB dependency
-        console.log('Initializing CSV Tools...');
-        
-        window.csvTables = new Map();
-        window.duckdbReady = true;
-        window.duckdb = {
-            // Mock DuckDB interface for compatibility
-            loadCSV: function(file, tableName) {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        try {
-                            const csv = e.target.result;
-                            const table = parseCSV(csv);
-                            window.csvTables.set(tableName, table);
-                            console.log(`Loaded ${table.length} rows into table ${tableName}`);
-                            resolve(tableName);
-                        } catch (error) {
-                            reject(error);
-                        }
-                    };
-                    reader.onerror = reject;
-                    reader.readAsText(file);
-                });
-            },
-            runQuery: function(sql) {
-                return new Promise((resolve) => {
-                    // Simple query processing for basic SELECT statements
-                    const result = processSimpleQuery(sql);
-                    resolve(result);
-                });
-            },
-            listTables: function() {
-                return Promise.resolve(Array.from(window.csvTables.keys()));
-            },
-            getRowCount: function(tableName) {
-                const table = window.csvTables.get(tableName);
-                return Promise.resolve(table ? table.length : 0);
-            },
-            dropTable: function(tableName) {
-                window.csvTables.delete(tableName);
-                return Promise.resolve();
-            }
-        };
-        
-        // Simple CSV parser
-        function parseCSV(csvText) {
-            const lines = csvText.trim().split('\n');
-            const headers = parseCSVLine(lines[0]);
-            const rows = [];
-            
-            for (let i = 1; i < lines.length; i++) {
-                const values = parseCSVLine(lines[i]);
-                const row = {};
-                headers.forEach((header, index) => {
-                    row[header] = values[index] || '';
-                });
-                rows.push(row);
-            }
-            return rows;
-        }
-        
-        // Parse a single CSV line (handles quoted fields)
-        function parseCSVLine(line) {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-                if (char === '"') {
-                    inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
-                    result.push(current.trim());
-                    current = '';
-                } else {
-                    current += char;
-                }
-            }
-            result.push(current.trim());
-            return result;
-        }
-        
-        // Simple query processor (handles basic SELECT, LIMIT, WHERE)
-        function processSimpleQuery(sql) {
-            const sqlUpper = sql.toUpperCase();
-            
-            // Handle basic SELECT queries
-            if (sqlUpper.includes('SELECT')) {
-                // Extract table name
-                const fromMatch = sql.match(/FROM\s+(\w+)/i);
-                if (!fromMatch) {
-                    // Handle queries without FROM clause (like SELECT 1)
-                    if (sqlUpper.includes('SELECT 1')) {
-                        return [{ 'test_column': 1 }];
-                    }
-                    return [];
-                }
-                
-                const tableName = fromMatch[1];
-                const table = window.csvTables.get(tableName);
-                if (!table) {
-                    throw new Error(`Table ${tableName} not found`);
-                }
-                
-                let result = [...table];
-                
-                // Handle LIMIT
-                const limitMatch = sql.match(/LIMIT\s+(\d+)/i);
-                if (limitMatch) {
-                    const limit = parseInt(limitMatch[1]);
-                    result = result.slice(0, limit);
-                }
-                
-                console.log(`Query returned ${result.length} rows`);
-                return result;
-            }
-            
-            return [];
-        }
-        
-        console.log('CSV Tools initialized successfully (Simple Mode)');
-    </script>
+    <!-- PyScript for DuckDB integration -->
+    <script type="module" src="https://pyscript.net/releases/2024.8.2/core.js"></script>
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="css/style.css">
@@ -142,33 +18,46 @@
 <body>
     <div id="app">
         <header>
-            <h1>CSV Tools</h1>
-            <p>Upload CSV files and query with SQL - DuckDB WASM Version</p>
-            <div id="loading-status">Initializing DuckDB...</div>
+            <h1>Join CSV/Excel files like SQL Tables</h1>
+            <p>Upload CSV/Excel files and query with full SQL - DuckDB-powered</p>
+            <div id="loading-status">Initializing Pyodide environment...</div>
+            <div class="loading-progress">
+                <div class="loading-bar" id="loading-bar"></div>
+            </div>
         </header>
         
-        <div id="upload-section" style="display: none;">
+        <div id="upload-section" class="hidden">
             <h2>Upload Files</h2>
             <div id="dropzone" class="dropzone">
                 <div class="dz-message">
-                    <strong>Drop CSV files here or click to upload</strong>
-                    <span class="note">(Max file size: 10MB)</span>
+                    <strong>Drop CSV/Excel files here or click to upload</strong>
+                    <span class="note">(Supports .csv, .xlsx files - Max size: 50MB)</span>
                 </div>
             </div>
             <div id="file-list"></div>
         </div>
         
-        <div id="query-section" style="display: none;">
+        <div id="query-section" class="hidden">
             <h2>SQL Query</h2>
             <div id="sql-editor"></div>
             <div class="query-controls">
                 <button id="run-query">Run Query</button>
                 <span class="shortcut-hint">Ctrl+Enter to run</span>
+                <div class="query-examples">
+                    <select id="example-queries">
+                        <option value="">Load example query...</option>
+                        <option value="SELECT * FROM t1 LIMIT 10;">Basic SELECT</option>
+                        <option value="SELECT column, COUNT(*) as count FROM t1 GROUP BY column ORDER BY count DESC;">Group By Count</option>
+                        <option value="SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;">Inner Join</option>
+                        <option value="SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY value DESC) as rank FROM t1;">Window Function</option>
+                    </select>
+                </div>
             </div>
         </div>
         
-        <div id="results-section" style="display: none;">
+        <div id="results-section" class="hidden">
             <h2>Results</h2>
+            <div id="query-info" class="query-info"></div>
             <div id="results-table"></div>
             <div class="export-controls">
                 <button id="export-csv">Export as CSV</button>
@@ -178,12 +67,1582 @@
         <div id="error-container"></div>
     </div>
     
-    <!-- Load our JavaScript modules -->
-    <script src="js/duckdb-manager.js?v=6"></script>
-    <script src="js/file-handler.js?v=6"></script>
-    <script src="js/sql-editor.js?v=6"></script>
-    <script src="js/results-table.js?v=6"></script>
-    <script src="js/csv-exporter.js?v=6"></script>
-    <script src="js/main.js?v=6"></script>
+    <!-- DuckDB Python Module -->
+    <script type="py" config='{"packages":["duckdb", "pandas", "openpyxl"]}' id="python-code">
+import duckdb
+import pandas as pd
+import io
+import base64
+from js import console, document, File, Blob, URL
+import asyncio
+
+class DuckDBCSVTools:
+    def __init__(self):
+        self.conn = duckdb.connect(':memory:')
+        self.excel_extension_available = False
+        
+        # Install and load Excel extension
+        try:
+            console.log("Attempting to install Excel extension...")
+            self.conn.execute("INSTALL excel")
+            console.log("Excel extension installed, loading...")
+            self.conn.execute("LOAD excel")
+            
+            # Test if Excel extension is working
+            console.log("Testing Excel extension functionality...")
+            test_result = self.conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE extension_name = 'excel'").fetchall()
+            if test_result:
+                self.excel_extension_available = True
+                console.log("DuckDB with Excel support initialized successfully")
+            else:
+                console.log("Excel extension installed but not found in extensions list - will use pandas fallback")
+                
+        except Exception as e:
+            console.error(f"Excel extension initialization failed: {e}")
+            console.log("DuckDB initialized without Excel support - will use fallback for Excel files")
+        
+        self.tables = {}
+        self.table_counter = 1
+    
+    def load_csv_file(self, file_content, filename, has_headers=True):
+        """Load CSV data into DuckDB using native read_csv with file alias"""
+        try:
+            # Generate table name
+            table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            console.log(f"Loading CSV {filename} as {table_name} with has_headers={has_headers}")
+            
+            # Write CSV content to virtual filesystem for DuckDB to read
+            temp_path = f"/tmp/{filename}"
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(file_content)
+            
+            console.log(f"Written CSV to virtual filesystem: {temp_path}")
+            
+            # Use DuckDB's native read_csv function to create a view/alias
+            if has_headers:
+                # Read CSV with headers
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_csv('{temp_path}', header=true, auto_detect=true)
+                """)
+            else:
+                # Read CSV without headers, let DuckDB auto-generate column names
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
+                
+                # Get the auto-generated column names and rename them to c1, c2, c3...
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                original_columns = [row[0] for row in columns_result]
+                
+                # Create new column aliases c1, c2, c3...
+                column_aliases = []
+                for i, col in enumerate(original_columns):
+                    column_aliases.append(f'"{col}" as c{i+1}')
+                
+                # Recreate view with proper column names
+                columns_sql = ', '.join(column_aliases)
+                self.conn.execute(f"DROP VIEW {table_name}")
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT {columns_sql} FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
+            
+            console.log(f"Created DuckDB view {table_name}")
+            
+            # Get table info
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            console.log(f"View has {row_count} rows and columns: {columns}")
+            
+            # Store metadata
+            self.tables[table_name] = {
+                'filename': filename,
+                'rows': row_count,
+                'columns': columns,
+                'size': len(file_content),
+                'has_headers': has_headers,
+                'temp_path': temp_path  # Store path for potential reloading
+            }
+            
+            console.log(f"Successfully loaded CSV {filename} as view {table_name} with {row_count} rows and {len(columns)} columns")
+            return {
+                'table_name': table_name,
+                'rows': row_count,
+                'columns': columns,
+                'success': True,
+                'has_headers': has_headers
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load CSV {filename}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def load_excel_file(self, file_content, filename):
+        """Load Excel data into DuckDB using native read_xlsx with view alias"""
+        try:
+            console.log(f"Starting Excel file processing for {filename}")
+            console.log(f"Excel extension available: {self.excel_extension_available}")
+            
+            # Decode base64 content to bytes
+            file_bytes = base64.b64decode(file_content)
+            console.log(f"Decoded {len(file_bytes)} bytes from base64")
+            
+            # Generate table name
+            table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            if not self.excel_extension_available:
+                console.log("Excel extension not available, using pandas fallback method")
+                console.log(f"Calling load_excel_fallback with {len(file_bytes)} bytes for {filename}")
+                return self.load_excel_fallback(file_bytes, filename, table_name)
+            
+            try:
+                # Write to a temporary file that DuckDB can access
+                temp_path = f"/tmp/{filename}"
+                console.log(f"Writing Excel file to virtual filesystem at {temp_path}")
+                
+                # Write the file to the virtual filesystem
+                with open(temp_path, 'wb') as f:
+                    f.write(file_bytes)
+                
+                console.log(f"File written successfully, creating view with DuckDB Excel extension...")
+                
+                # Try different Excel reading approaches with VIEW creation
+                success = False
+                
+                # Approach 1: Basic read_xlsx as VIEW
+                try:
+                    console.log("Trying basic read_xlsx view...")
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM read_xlsx('{temp_path}')
+                    """)
+                    success = True
+                    console.log("Basic read_xlsx view succeeded")
+                except Exception as e1:
+                    console.log(f"Basic read_xlsx view failed: {e1}")
+                
+                # Approach 2: With header specification
+                if not success:
+                    try:
+                        console.log("Trying read_xlsx view with header=true...")
+                        self.conn.execute(f"""
+                            CREATE VIEW {table_name} AS 
+                            SELECT * FROM read_xlsx('{temp_path}', header=true)
+                        """)
+                        success = True
+                        console.log("read_xlsx view with header succeeded")
+                    except Exception as e2:
+                        console.log(f"read_xlsx view with header failed: {e2}")
+                
+                # Approach 3: With all_varchar for problematic files
+                if not success:
+                    try:
+                        console.log("Trying read_xlsx view with all_varchar=true...")
+                        self.conn.execute(f"""
+                            CREATE VIEW {table_name} AS 
+                            SELECT * FROM read_xlsx('{temp_path}', all_varchar=true)
+                        """)
+                        success = True
+                        console.log("read_xlsx view with all_varchar succeeded")
+                    except Exception as e3:
+                        console.log(f"read_xlsx view with all_varchar failed: {e3}")
+                
+                # Approach 4: Try with sheet name specification for multi-sheet files
+                if not success:
+                    try:
+                        console.log("Trying read_xlsx view with first sheet...")
+                        self.conn.execute(f"""
+                            CREATE VIEW {table_name} AS 
+                            SELECT * FROM read_xlsx('{temp_path}', sheet_name=0)
+                        """)
+                        success = True
+                        console.log("read_xlsx view with sheet_name=0 succeeded")
+                    except Exception as e4:
+                        console.log(f"read_xlsx view with sheet_name failed: {e4}")
+                        # If all DuckDB approaches fail, try fallback
+                        console.log("All DuckDB Excel approaches failed, trying fallback...")
+                        return self.load_excel_fallback(file_bytes, filename, table_name)
+                
+                if success:
+                    console.log(f"View {table_name} created successfully with DuckDB Excel extension")
+                    
+                    # Get view info
+                    count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                    row_count = count_result[0]
+                    console.log(f"View has {row_count} rows")
+                    
+                    columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    columns = [row[0] for row in columns_result]
+                    console.log(f"View has columns: {columns}")
+                    
+                    # Store metadata
+                    self.tables[table_name] = {
+                        'filename': filename,
+                        'rows': row_count,
+                        'columns': columns,
+                        'size': len(file_bytes),
+                        'has_headers': True,  # Excel files typically have headers
+                        'temp_path': temp_path,  # Store for cleanup
+                        'file_type': 'excel'  # Mark as Excel for proper cleanup
+                    }
+                    
+                    console.log(f"Successfully loaded Excel {filename} as view {table_name} with {row_count} rows and {len(columns)} columns")
+                    return {
+                        'success': True,
+                        'table_name': table_name,
+                        'rows': row_count,
+                        'columns': columns,
+                        'has_headers': True
+                    }
+                
+            except Exception as excel_error:
+                console.error(f"DuckDB Excel processing completely failed: {excel_error}")
+                console.log("Attempting fallback Excel processing...")
+                return self.load_excel_fallback(file_bytes, filename, table_name)
+            
+        except Exception as e:
+            console.error(f"Failed to load Excel {filename}: {str(e)}")
+            return {'success': False, 'error': f'File processing error: {str(e)}. Please ensure the file is a valid Excel (.xlsx) file.'}
+    
+    def load_excel_fallback(self, file_bytes, filename, table_name):
+        """Fallback Excel processing using pandas when DuckDB Excel extension is not available"""
+        try:
+            console.log(f"Using pandas fallback for Excel processing: {filename}")
+            
+            # Create BytesIO object from file bytes for pandas
+            excel_buffer = io.BytesIO(file_bytes)
+            console.log(f"Created BytesIO buffer with {len(file_bytes)} bytes")
+            
+            # Try to read Excel file with pandas
+            try:
+                # First, try to get sheet names
+                try:
+                    excel_file = pd.ExcelFile(excel_buffer)
+                    sheet_names = excel_file.sheet_names
+                    console.log(f"Found sheets in Excel file: {sheet_names}")
+                    
+                    # Auto-load the first sheet but store info about other sheets
+                    first_sheet = sheet_names[0] if sheet_names else 0
+                    console.log(f"Auto-loading first sheet: {first_sheet}")
+                    
+                    # Reset buffer position and load first sheet
+                    excel_buffer.seek(0)
+                    df = pd.read_excel(excel_buffer, sheet_name=first_sheet, engine='openpyxl')
+                    
+                    console.log(f"Successfully read first sheet with pandas: {df.shape[0]} rows, {df.shape[1]} columns")
+                    console.log(f"Columns: {list(df.columns)}")
+                    
+                    # Clean up column names (remove any problematic characters)
+                    df.columns = [str(col).strip() for col in df.columns]
+                    
+                    # Convert DataFrame to DuckDB table using DuckDB's pandas integration
+                    console.log(f"Creating DuckDB view from pandas DataFrame...")
+                    
+                    # Register the DataFrame with DuckDB
+                    self.conn.register(f'{table_name}_df', df)
+                    
+                    # Create a view that references the registered DataFrame
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM {table_name}_df
+                    """)
+                    
+                    console.log(f"Successfully created DuckDB view {table_name} from pandas DataFrame")
+                    
+                    # Get final table info
+                    count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                    row_count = count_result[0]
+                    
+                    columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    columns = [row[0] for row in columns_result]
+                    
+                    # Store metadata including sheet information for later loading
+                    self.tables[table_name] = {
+                        'filename': filename,
+                        'rows': row_count,
+                        'columns': columns,
+                        'size': len(file_bytes),
+                        'has_headers': True,
+                        'file_type': 'excel',
+                        'processing_method': 'pandas_fallback',
+                        'dataframe_name': f'{table_name}_df',  # Store for cleanup
+                        'available_sheets': sheet_names,
+                        'current_sheet': first_sheet,
+                        'excel_buffer': file_bytes  # Store original bytes for loading other sheets
+                    }
+                    
+                    console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
+                    
+                    return {
+                        'success': True,
+                        'table_name': table_name,
+                        'rows': row_count,
+                        'columns': columns,
+                        'has_headers': True,
+                        'processing_method': 'pandas_fallback',
+                        'available_sheets': sheet_names,
+                        'current_sheet': first_sheet
+                    }
+                    
+                except Exception as sheet_error:
+                    console.log(f"Sheet-specific reading failed: {sheet_error}, trying default read with single sheet")
+                    # Reset buffer position
+                    excel_buffer.seek(0)
+                    df = pd.read_excel(excel_buffer, engine='openpyxl')
+                    
+                    # Process as single sheet file
+                    console.log(f"Successfully read Excel with pandas: {df.shape[0]} rows, {df.shape[1]} columns")
+                    console.log(f"Columns: {list(df.columns)}")
+                    
+                    # Clean up column names (remove any problematic characters)
+                    df.columns = [str(col).strip() for col in df.columns]
+                    
+                    # Convert DataFrame to DuckDB table using DuckDB's pandas integration
+                    console.log(f"Creating DuckDB view from pandas DataFrame...")
+                    
+                    # Register the DataFrame with DuckDB
+                    self.conn.register(f'{table_name}_df', df)
+                    
+                    # Create a view that references the registered DataFrame
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM {table_name}_df
+                    """)
+                    
+                    console.log(f"Successfully created DuckDB view {table_name} from pandas DataFrame")
+                    
+                    # Get final table info
+                    count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                    row_count = count_result[0]
+                    
+                    columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    columns = [row[0] for row in columns_result]
+                    
+                    # Store metadata including sheet information
+                    self.tables[table_name] = {
+                        'filename': filename,
+                        'rows': row_count,
+                        'columns': columns,
+                        'size': len(file_bytes),
+                        'has_headers': True,
+                        'file_type': 'excel',
+                        'processing_method': 'pandas_fallback',
+                        'dataframe_name': f'{table_name}_df',  # Store for cleanup
+                        'available_sheets': ['Sheet1'],
+                        'current_sheet': 'Sheet1',
+                        'excel_buffer': file_bytes  # Store original bytes for loading other sheets
+                    }
+                    
+                    console.log(f"Pandas fallback successful: {filename} loaded as {table_name} with {row_count} rows and {len(columns)} columns")
+                    
+                    return {
+                        'success': True,
+                        'table_name': table_name,
+                        'rows': row_count,
+                        'columns': columns,
+                        'has_headers': True,
+                        'processing_method': 'pandas_fallback'
+                    }
+                
+            except Exception as pandas_error:
+                console.error(f"Pandas Excel processing failed: {pandas_error}")
+                
+                # Provide helpful error message with context
+                error_message = str(pandas_error)
+                if "openpyxl" in error_message.lower():
+                    detailed_error = f"Excel reading failed: openpyxl engine error. The file may be corrupted or in an unsupported format."
+                elif "sheet" in error_message.lower():
+                    detailed_error = f"Sheet access error: {error_message}. The file may have protected sheets or unusual structure."
+                else:
+                    detailed_error = f"Excel processing error: {error_message}"
+                
+                return {
+                    'success': False,
+                    'error': f'Pandas fallback failed: {detailed_error}\n\nTo resolve:\n1. Ensure the file is a valid .xlsx format\n2. Check if the file is password-protected or corrupted\n3. Try converting to CSV format as an alternative'
+                }
+            
+        except Exception as e:
+            console.error(f"Excel fallback processing failed: {e}")
+            return {'success': False, 'error': f'Excel fallback processing failed: {str(e)}. Please ensure the file is a valid Excel (.xlsx) file.'}
+    
+    def load_excel_sheet(self, filename, sheet_name_or_index):
+        """Load a specific sheet from an Excel file"""
+        try:
+            if not self.excel_extension_available:
+                return {'success': False, 'error': 'Excel extension not available'}
+            
+            # Find the Excel file
+            excel_table = None
+            temp_path = None
+            for table_name, info in self.tables.items():
+                if info['filename'] == filename and info.get('file_type') == 'excel':
+                    temp_path = info.get('temp_path')
+                    break
+            
+            if not temp_path:
+                return {'success': False, 'error': f'Excel file {filename} not found'}
+            
+            # Generate new table name
+            table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            console.log(f"Loading sheet '{sheet_name_or_index}' from {filename} as {table_name}")
+            
+            # Create view for specific sheet
+            try:
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_xlsx('{temp_path}', sheet_name='{sheet_name_or_index}')
+                """)
+                console.log(f"Successfully loaded sheet '{sheet_name_or_index}'")
+            except:
+                # Try with numeric index if name failed
+                try:
+                    self.conn.execute(f"""
+                        CREATE VIEW {table_name} AS 
+                        SELECT * FROM read_xlsx('{temp_path}', sheet_name={sheet_name_or_index})
+                    """)
+                    console.log(f"Successfully loaded sheet index {sheet_name_or_index}")
+                except Exception as e:
+                    console.error(f"Failed to load sheet: {e}")
+                    return {'success': False, 'error': f'Failed to load sheet: {str(e)}'}
+            
+            # Get view info
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            # Store metadata
+            self.tables[table_name] = {
+                'filename': f"{filename} (Sheet: {sheet_name_or_index})",
+                'rows': row_count,
+                'columns': columns,
+                'size': 0,  # Unknown for individual sheets
+                'has_headers': True,
+                'temp_path': temp_path,  # Same file, different sheet
+                'file_type': 'excel',
+                'sheet': sheet_name_or_index
+            }
+            
+            console.log(f"Successfully loaded sheet '{sheet_name_or_index}' as {table_name}")
+            return {
+                'success': True,
+                'table_name': table_name,
+                'rows': row_count,
+                'columns': columns,
+                'sheet': sheet_name_or_index
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load Excel sheet: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def load_additional_sheet(self, base_table_name, sheet_name):
+        """Load an additional sheet from an already loaded Excel file"""
+        try:
+            if base_table_name not in self.tables:
+                return {'success': False, 'error': 'Base table not found'}
+            
+            base_info = self.tables[base_table_name]
+            if base_info.get('file_type') != 'excel':
+                return {'success': False, 'error': 'Not an Excel file'}
+            
+            available_sheets = base_info.get('available_sheets', [])
+            if sheet_name not in available_sheets:
+                return {'success': False, 'error': f'Sheet "{sheet_name}" not found. Available sheets: {", ".join(available_sheets)}'}
+            
+            # Check if this sheet is already loaded
+            for table_name, info in self.tables.items():
+                if (info.get('original_filename') == base_info['filename'] and 
+                    info.get('sheet_name') == sheet_name):
+                    return {
+                        'success': False, 
+                        'error': f'Sheet "{sheet_name}" is already loaded as table {table_name}',
+                        'existing_table': table_name
+                    }
+            
+            console.log(f"Loading additional sheet '{sheet_name}' from {base_info['filename']}")
+            
+            # Generate new table name
+            new_table_name = f"t{self.table_counter}"
+            self.table_counter += 1
+            
+            # Get the original file bytes
+            file_bytes = base_info.get('excel_buffer')
+            if not file_bytes:
+                return {'success': False, 'error': 'Original file data not available'}
+            
+            # Load the sheet using pandas
+            excel_buffer = io.BytesIO(file_bytes)
+            df = pd.read_excel(excel_buffer, sheet_name=sheet_name, engine='openpyxl')
+            
+            console.log(f"Loaded sheet '{sheet_name}': {df.shape[0]} rows, {df.shape[1]} columns")
+            
+            # Clean up column names
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            # Register DataFrame and create view
+            df_name = f'{new_table_name}_df'
+            self.conn.register(df_name, df)
+            self.conn.execute(f"""
+                CREATE VIEW {new_table_name} AS 
+                SELECT * FROM {df_name}
+            """)
+            
+            # Get table info
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {new_table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {new_table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            # Store metadata
+            self.tables[new_table_name] = {
+                'filename': f"{base_info['filename']} (Sheet: {sheet_name})",
+                'rows': row_count,
+                'columns': columns,
+                'size': len(file_bytes),
+                'has_headers': True,
+                'file_type': 'excel',
+                'processing_method': 'pandas_fallback',
+                'dataframe_name': df_name,
+                'sheet_name': sheet_name,
+                'original_filename': base_info['filename'],
+                'excel_buffer': file_bytes,
+                'available_sheets': available_sheets  # Copy available sheets for potential future loads
+            }
+            
+            console.log(f"Successfully loaded additional sheet '{sheet_name}' as {new_table_name}")
+            
+            return {
+                'success': True,
+                'table_name': new_table_name,
+                'sheet_name': sheet_name,
+                'rows': row_count,
+                'columns': columns
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load additional sheet: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
+    def load_selected_sheets(self, excel_file_info_js, selected_sheets_js):
+        """Load selected sheets from an Excel file as separate tables"""
+        try:
+            # Convert JavaScript objects to Python
+            excel_file_info = excel_file_info_js.to_py() if hasattr(excel_file_info_js, 'to_py') else excel_file_info_js
+            selected_sheets = selected_sheets_js.to_py() if hasattr(selected_sheets_js, 'to_py') else selected_sheets_js
+            
+            filename = excel_file_info['filename']
+            file_bytes = excel_file_info['excel_buffer']
+            
+            # Convert file_bytes to proper bytes if it's a JavaScript array
+            if hasattr(file_bytes, 'to_py'):
+                file_bytes = bytes(file_bytes.to_py())
+            elif not isinstance(file_bytes, bytes):
+                file_bytes = bytes(file_bytes)
+            
+            console.log(f"Loading selected sheets {selected_sheets} from {filename}")
+            console.log(f"File bytes type: {type(file_bytes)}, length: {len(file_bytes)}")
+            
+            loaded_tables = []
+            
+            for sheet_name in selected_sheets:
+                # Generate table name
+                table_name = f"t{self.table_counter}"
+                self.table_counter += 1
+                
+                console.log(f"Loading sheet '{sheet_name}' as table {table_name}")
+                
+                # Load the sheet using pandas
+                excel_buffer = io.BytesIO(file_bytes)
+                df = pd.read_excel(excel_buffer, sheet_name=sheet_name, engine='openpyxl')
+                
+                console.log(f"Loaded sheet '{sheet_name}': {df.shape[0]} rows, {df.shape[1]} columns")
+                
+                # Clean up column names
+                df.columns = [str(col).strip() for col in df.columns]
+                
+                # Register DataFrame and create view
+                df_name = f'{table_name}_df'
+                self.conn.register(df_name, df)
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM {df_name}
+                """)
+                
+                # Get table info
+                count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+                row_count = count_result[0]
+                
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                columns = [row[0] for row in columns_result]
+                
+                # Store metadata
+                self.tables[table_name] = {
+                    'filename': f"{filename} (Sheet: {sheet_name})",
+                    'rows': row_count,
+                    'columns': columns,
+                    'size': len(file_bytes),
+                    'has_headers': True,
+                    'file_type': 'excel',
+                    'processing_method': 'pandas_fallback',
+                    'dataframe_name': df_name,
+                    'sheet_name': sheet_name,
+                    'original_filename': filename,
+                    'excel_buffer': file_bytes
+                }
+                
+                loaded_tables.append({
+                    'table_name': table_name,
+                    'sheet_name': sheet_name,
+                    'rows': row_count,
+                    'columns': columns
+                })
+                
+                console.log(f"Successfully loaded sheet '{sheet_name}' as {table_name}")
+            
+            return {
+                'success': True,
+                'loaded_tables': loaded_tables,
+                'filename': filename
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to load selected sheets: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
+    def switch_excel_sheet(self, table_name, sheet_name):
+        """Switch to a different sheet for an existing Excel file"""
+        try:
+            if table_name not in self.tables:
+                return {'success': False, 'error': 'Table not found'}
+            
+            table_info = self.tables[table_name]
+            if table_info.get('file_type') != 'excel':
+                return {'success': False, 'error': 'Not an Excel file'}
+            
+            available_sheets = table_info.get('available_sheets', [])
+            if sheet_name not in available_sheets:
+                return {'success': False, 'error': f'Sheet "{sheet_name}" not found. Available sheets: {", ".join(available_sheets)}'}
+            
+            console.log(f"Switching {table_name} to sheet: {sheet_name}")
+            
+            # Get the original file bytes
+            file_bytes = table_info.get('excel_buffer')
+            if not file_bytes:
+                return {'success': False, 'error': 'Original file data not available'}
+            
+            # Clean up existing DataFrame and view
+            old_df_name = table_info.get('dataframe_name')
+            if old_df_name:
+                try:
+                    self.conn.unregister(old_df_name)
+                except:
+                    pass
+            
+            try:
+                self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+            except:
+                pass
+            
+            # Load the new sheet using pandas
+            excel_buffer = io.BytesIO(file_bytes)
+            df = pd.read_excel(excel_buffer, sheet_name=sheet_name, engine='openpyxl')
+            
+            console.log(f"Loaded sheet '{sheet_name}': {df.shape[0]} rows, {df.shape[1]} columns")
+            
+            # Clean up column names
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            # Register new DataFrame and create view
+            new_df_name = f'{table_name}_df'
+            self.conn.register(new_df_name, df)
+            self.conn.execute(f"""
+                CREATE VIEW {table_name} AS 
+                SELECT * FROM {new_df_name}
+            """)
+            
+            # Update metadata
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            # Update table info
+            table_info.update({
+                'rows': row_count,
+                'columns': columns,
+                'current_sheet': sheet_name,
+                'dataframe_name': new_df_name
+            })
+            
+            console.log(f"Successfully switched to sheet '{sheet_name}' with {row_count} rows")
+            
+            return {
+                'success': True,
+                'table_name': table_name,
+                'sheet_name': sheet_name,
+                'rows': row_count,
+                'columns': columns
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to switch Excel sheet: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def list_excel_sheets(self, file_content, filename):
+        """List all sheets in an Excel file"""
+        try:
+            console.log(f"Listing sheets in Excel file: {filename}")
+            
+            # Decode base64 content to bytes
+            file_bytes = base64.b64decode(file_content)
+            
+            # Write to temporary file
+            temp_path = f"/tmp/{filename}"
+            with open(temp_path, 'wb') as f:
+                f.write(file_bytes)
+            
+            # Try to get sheet names using DuckDB
+            try:
+                # This is a hypothetical query - DuckDB might not support sheet listing directly
+                result = self.conn.execute(f"SELECT sheet_name FROM read_xlsx_metadata('{temp_path}')").fetchall()
+                sheets = [row[0] for row in result]
+                console.log(f"Found sheets: {sheets}")
+                return {'success': True, 'sheets': sheets}
+            except:
+                # Fallback - assume single sheet
+                console.log("Sheet listing not supported, assuming single sheet")
+                return {'success': True, 'sheets': ['Sheet1']}
+                
+        except Exception as e:
+            console.error(f"Failed to list sheets in {filename}: {str(e)}")
+            return {'success': False, 'error': str(e), 'sheets': []}
+    
+    def execute_query(self, sql):
+        """Execute SQL query using pure DuckDB"""
+        try:
+            # Execute query with DuckDB and get results as list
+            result = self.conn.execute(sql).fetchall()
+            
+            # Get column names
+            columns = [desc[0] for desc in self.conn.description]
+            
+            # Convert to list of dictionaries
+            data = []
+            for row in result:
+                data.append({columns[i]: row[i] for i in range(len(columns))})
+            
+            # Convert to JSON-serializable format
+            result_dict = {
+                'success': True,
+                'rows': len(result),
+                'columns': columns,
+                'data': data,
+                'query': sql
+            }
+            
+            console.log(f"Query executed successfully: {len(result)} rows returned")
+            return result_dict
+            
+        except Exception as e:
+            console.error(f"Query failed: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': sql
+            }
+    
+    
+    def get_table_info(self):
+        """Get information about all loaded tables"""
+        return {
+            'tables': self.tables,
+            'count': len(self.tables)
+        }
+    
+    def drop_table(self, table_name):
+        """Drop a table/view from DuckDB with proper cleanup"""
+        try:
+            # Drop the view
+            self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+            console.log(f"Dropped view {table_name}")
+            
+            # Clean up pandas DataFrame if it exists (for fallback processing)
+            if table_name in self.tables and 'dataframe_name' in self.tables[table_name]:
+                df_name = self.tables[table_name]['dataframe_name']
+                try:
+                    self.conn.unregister(df_name)
+                    console.log(f"Unregistered pandas DataFrame: {df_name}")
+                except Exception as df_cleanup_error:
+                    console.log(f"Could not unregister DataFrame {df_name}: {df_cleanup_error}")
+            
+            # Clean up temporary file if it exists
+            if table_name in self.tables and 'temp_path' in self.tables[table_name]:
+                temp_path = self.tables[table_name]['temp_path']
+                try:
+                    import os
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                        console.log(f"Cleaned up temp file: {temp_path}")
+                except Exception as cleanup_error:
+                    console.log(f"Could not clean up temp file {temp_path}: {cleanup_error}")
+            
+            # Remove from local tracking
+            if table_name in self.tables:
+                del self.tables[table_name]
+                
+            console.log(f"Successfully removed view {table_name}")
+            return {'success': True}
+        except Exception as e:
+            console.error(f"Failed to drop view {table_name}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def reload_table_with_headers(self, table_name, file_content, has_headers):
+        """Reload an existing view with different header settings"""
+        try:
+            if table_name not in self.tables:
+                return {'success': False, 'error': 'View not found'}
+            
+            console.log(f"Reloading view {table_name} with has_headers={has_headers}")
+            
+            # Get the original filename and temp path
+            filename = self.tables[table_name]['filename']
+            temp_path = self.tables[table_name]['temp_path']
+            
+            # Drop the existing view
+            self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+            console.log(f"Dropped existing view {table_name}")
+            
+            # Write updated CSV content to same temp path
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(file_content)
+            console.log(f"Updated CSV content in {temp_path}")
+            
+            # Recreate view with new header setting
+            if has_headers:
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT * FROM read_csv('{temp_path}', header=true, auto_detect=true)
+                """)
+            else:
+                # Read without headers and create c1, c2, c3... aliases
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name}_temp AS 
+                    SELECT * FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
+                
+                # Get auto-generated columns and create aliases
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}_temp").fetchall()
+                original_columns = [row[0] for row in columns_result]
+                
+                column_aliases = []
+                for i, col in enumerate(original_columns):
+                    column_aliases.append(f'"{col}" as c{i+1}')
+                
+                columns_sql = ', '.join(column_aliases)
+                self.conn.execute(f"DROP VIEW {table_name}_temp")
+                self.conn.execute(f"""
+                    CREATE VIEW {table_name} AS 
+                    SELECT {columns_sql} FROM read_csv('{temp_path}', header=false, auto_detect=true)
+                """)
+            
+            console.log(f"Recreated view {table_name}")
+            
+            # Update metadata
+            count_result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            row_count = count_result[0]
+            
+            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            columns = [row[0] for row in columns_result]
+            
+            self.tables[table_name].update({
+                'rows': row_count,
+                'columns': columns,
+                'has_headers': has_headers,
+                'size': len(file_content)
+            })
+            
+            console.log(f"Successfully reloaded {table_name} with {row_count} rows and columns: {columns}")
+            
+            return {
+                'success': True,
+                'table_name': table_name,
+                'rows': row_count,
+                'columns': columns,
+                'has_headers': has_headers,
+                'reloaded': True
+            }
+            
+        except Exception as e:
+            console.error(f"Failed to reload view {table_name}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def export_to_csv(self, sql):
+        """Export query results to CSV using pure DuckDB"""
+        try:
+            result = self.conn.execute(sql).fetchall()
+            columns = [desc[0] for desc in self.conn.description]
+            
+            # Build CSV content
+            csv_lines = [','.join(columns)]  # Header
+            for row in result:
+                csv_lines.append(','.join([str(val) if val is not None else '' for val in row]))
+            
+            csv_content = '\n'.join(csv_lines)
+            
+            return {
+                'success': True,
+                'content': csv_content,
+                'rows': len(result)
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+
+# Global instance
+csv_tools = DuckDBCSVTools()
+
+# Make it accessible to JavaScript
+from js import window
+window.csv_tools = csv_tools
+    </script>
+    
+    <!-- JavaScript Application -->
+    <script>
+        let pyodide;
+        let csvTools;
+        
+        // Initialize PyScript and DuckDB
+        async function initializePyScript() {
+            try {
+                updateLoadingStatus("Loading PyScript runtime...", 20);
+                
+                // Wait for PyScript to be ready
+                await new Promise((resolve) => {
+                    document.addEventListener('py:ready', () => {
+                        console.log('PyScript ready event received');
+                        resolve();
+                    });
+                });
+                
+                updateLoadingStatus("Initializing DuckDB...", 60);
+                
+                // Wait a bit more for Python code to execute
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Get the Python CSV tools instance
+                window.csvTools = window.csv_tools;
+                csvTools = window.csv_tools;
+                
+                updateLoadingStatus("Ready!", 100);
+                
+                // Initialize UI
+                setTimeout(() => {
+                    initializeUI();
+                }, 500);
+                
+            } catch (error) {
+                console.error('Failed to initialize PyScript:', error);
+                showError(`Initialization failed: ${error.message}`);
+            }
+        }
+        
+        function updateLoadingStatus(message, progress = 0) {
+            const statusElement = document.getElementById('loading-status');
+            const progressBar = document.getElementById('loading-bar');
+            
+            if (statusElement) {
+                statusElement.textContent = message;
+            }
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+            }
+        }
+        
+        function initializeUI() {
+            // Hide loading and show main sections
+            document.getElementById('loading-status').classList.add('hidden');
+            document.querySelector('.loading-progress').classList.add('hidden');
+            document.getElementById('upload-section').classList.remove('hidden');
+            document.getElementById('query-section').classList.remove('hidden');
+            document.getElementById('results-section').classList.remove('hidden');
+            
+            // Initialize SQL editor
+            initializeSQLEditor();
+            
+            // Initialize file upload
+            initializeFileUpload();
+            
+            // Initialize event listeners
+            initializeEventListeners();
+            
+            console.log('Pyodide CSV Tools ready!');
+        }
+        
+        function initializeSQLEditor() {
+            window.sqlEditor = CodeMirror(document.getElementById('sql-editor'), {
+                mode: 'text/x-sql',
+                theme: 'default',
+                lineNumbers: true,
+                autoCloseBrackets: true,
+                matchBrackets: true,
+                indentUnit: 2,
+                lineWrapping: true,
+                value: '-- Welcome to CSV Tools with DuckDB!\n-- Upload some files and start querying\n\nSELECT * FROM t1 LIMIT 10;'
+            });
+        }
+        
+        function initializeFileUpload() {
+            const dropzone = document.getElementById('dropzone');
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.csv,.xlsx';
+            fileInput.multiple = true;
+            fileInput.classList.add('hidden');
+            document.body.appendChild(fileInput);
+            
+            dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('dragover', handleDragOver);
+            dropzone.addEventListener('drop', handleDrop);
+            dropzone.addEventListener('dragenter', handleDragEnter);
+            dropzone.addEventListener('dragleave', handleDragLeave);
+            
+            fileInput.addEventListener('change', handleFileSelect);
+        }
+        
+        function initializeEventListeners() {
+            document.getElementById('run-query').addEventListener('click', executeQuery);
+            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+            document.getElementById('example-queries').addEventListener('change', loadExampleQuery);
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    executeQuery();
+                }
+            });
+        }
+        
+        // File handling functions
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragEnter(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            processFiles(files);
+        }
+        
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            processFiles(files);
+            e.target.value = '';
+        }
+        
+        async function processFiles(files) {
+            for (const file of files) {
+                await processFile(file);
+            }
+            updateFileList();
+        }
+        
+        // Store file contents for reprocessing
+        window.fileContents = new Map();
+        
+        async function processFile(file) {
+            try {
+                showInfo(`Processing ${file.name}...`);
+                
+                const isExcel = file.name.match(/\.xlsx$/i);
+                const isOldExcel = file.name.match(/\.xls$/i);
+                
+                if (isOldExcel) {
+                    // Handle old .xls format (not supported by DuckDB)
+                    showError(`${file.name} uses the old .xls format which is not supported. Please save as .xlsx format instead.`);
+                } else if (isExcel) {
+                    // Process Excel file using official DuckDB Excel extension
+                    console.log(`Processing Excel file: ${file.name}, size: ${file.size} bytes`);
+                    
+                    const arrayBuffer = await file.arrayBuffer();
+                    const base64Content = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    console.log(`Converted to base64, length: ${base64Content.length}`);
+                    
+                    const resultRaw = window.csv_tools.load_excel_file(base64Content, file.name);
+                    const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                    
+                    console.log('Excel processing result:', result);
+                    
+                    if (result.success) {
+                        // Always auto-load first sheet now
+                        if (result.available_sheets && result.available_sheets.length > 1) {
+                            showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns) - First sheet: ${result.current_sheet}. Additional sheets available.`);
+                        } else {
+                            showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns)`);
+                        }
+                        updateSQLEditorWithTables();
+                    } else {
+                        console.error('Excel loading failed:', result.error);
+                        showError(`Failed to load ${file.name}: ${result.error}`);
+                    }
+                } else {
+                    // Process CSV file with default headers = true
+                    const content = await file.text();
+                    
+                    // Store file content for potential reprocessing
+                    window.fileContents.set(file.name, content);
+                    
+                    const resultRaw = window.csv_tools.load_csv_file(content, file.name, true);
+                    const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                    
+                    if (result.success) {
+                        showSuccess(`Loaded ${file.name} as ${result.table_name} (${result.rows} rows)`);
+                        updateSQLEditorWithTables();
+                    } else {
+                        showError(`Failed to load ${file.name}: ${result.error}`);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('File processing error:', error);
+                showError(`Error processing ${file.name}: ${error.message}`);
+            }
+        }
+        
+        function updateSQLEditorWithTables() {
+            const tableInfoRaw = window.csv_tools.get_table_info();
+            const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfoRaw;
+            const tableNames = Object.keys(tableInfo.tables);
+            
+            if (tableNames.length > 0) {
+                const comment = `-- Available tables: ${tableNames.join(', ')}\\n\\n`;
+                const currentValue = window.sqlEditor.getValue();
+                if (!currentValue.includes('Available tables:')) {
+                    window.sqlEditor.setValue(comment + currentValue);
+                }
+            }
+        }
+        
+        function updateFileList() {
+            const tableInfoRaw = window.csv_tools.get_table_info();
+            const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfoRaw;
+            const fileListContainer = document.getElementById('file-list');
+            
+            if (Object.keys(tableInfo.tables).length === 0) {
+                fileListContainer.innerHTML = '<p class="no-files">No files loaded yet</p>';
+                return;
+            }
+            
+            let html = '<div class="uploaded-files">';
+            for (const [tableName, info] of Object.entries(tableInfo.tables)) {
+                const isCSV = info.filename.toLowerCase().endsWith('.csv');
+                const isExcel = info.file_type === 'excel';
+                const hasHeaders = info.has_headers !== undefined ? info.has_headers : true;
+                
+                html += `
+                    <div class="file-item">
+                        <div class="file-info">
+                            <span class="file-name">${info.filename}</span>
+                            <span class="table-alias">→ ${tableName}</span>
+                        </div>
+                        <div class="file-stats">
+                            ${info.rows.toLocaleString()} rows, ${info.columns.length} columns
+                        </div>`;
+                        
+                // Add header toggle for CSV files only
+                if (isCSV) {
+                    html += `
+                        <div class="header-toggle">
+                            <input type="checkbox" id="header-${tableName}" ${hasHeaders ? 'checked' : ''} 
+                                   onchange="toggleHeaders('${tableName}', this.checked)">
+                            <label for="header-${tableName}">File has headers</label>
+                        </div>`;
+                }
+                
+                // Add additional sheet loader for Excel files with multiple sheets
+                if (isExcel && info.available_sheets && info.available_sheets.length > 1) {
+                    const currentSheet = info.current_sheet || info.sheet_name || info.available_sheets[0];
+                    const unloadedSheets = info.available_sheets.filter(sheetName => {
+                        // Check if this sheet is already loaded
+                        const originalFilename = info.original_filename || info.filename.split(' (Sheet:')[0];
+                        for (const [otherTableName, otherInfo] of Object.entries(tableInfo.tables)) {
+                            if (otherInfo.file_type === 'excel' && 
+                                (otherInfo.original_filename === originalFilename || 
+                                 otherInfo.filename.split(' (Sheet:')[0] === originalFilename) &&
+                                (otherInfo.sheet_name === sheetName || otherInfo.current_sheet === sheetName)) {
+                                return false; // Already loaded
+                            }
+                        }
+                        return true;
+                    });
+                    
+                    html += `
+                        <div class="sheet-info">
+                            <span class="sheet-name">Current Sheet: ${currentSheet}</span>
+                        </div>`;
+                    
+                    if (unloadedSheets.length > 0) {
+                        html += `
+                            <div class="additional-sheets">
+                                <label for="additional-sheet-${tableName}" style="font-size: 12px; color: #666;">
+                                    Load additional sheet:
+                                </label>
+                                <select id="additional-sheet-${tableName}" style="margin-left: 5px; font-size: 12px;" onchange="loadAdditionalSheet('${tableName}', this.value)">
+                                    <option value="">Choose sheet...</option>`;
+                        
+                        unloadedSheets.forEach(sheetName => {
+                            html += `<option value="${sheetName}">${sheetName}</option>`;
+                        });
+                        
+                        html += `
+                                </select>
+                            </div>`;
+                    }
+                } else if (isExcel) {
+                    // Show current sheet info even if only one sheet
+                    const currentSheet = info.current_sheet || info.sheet_name || 'Sheet1';
+                    html += `
+                        <div class="sheet-info">
+                            <span class="sheet-name">Sheet: ${currentSheet}</span>
+                        </div>`;
+                }
+                
+                // Show the actual headers
+                html += `
+                        <div class="file-headers">
+                            <strong>Columns:</strong>
+                            <div class="header-list">${info.columns.join(', ')}</div>
+                        </div>
+                        <div class="file-actions">
+                            <button onclick="removeTable('${tableName}')" class="remove-btn">Remove</button>
+                        </div>
+                    </div>`;
+            }
+            html += '</div>';
+            fileListContainer.innerHTML = html;
+        }
+        
+        async function executeQuery() {
+            try {
+                const sql = window.sqlEditor.getValue().trim();
+                if (!sql) {
+                    showError('Please enter a SQL query');
+                    return;
+                }
+                
+                showInfo('Executing query...');
+                
+                const result = window.csv_tools.execute_query(sql);
+                
+                // Convert PyScript result to JavaScript object
+                const jsResult = result.toJs ? result.toJs() : result;
+                
+                if (jsResult.success) {
+                    displayResults(jsResult);
+                    showSuccess(`Query executed: ${jsResult.rows} rows returned`);
+                } else {
+                    showError(`Query failed: ${jsResult.error}`);
+                    clearResults();
+                }
+                
+            } catch (error) {
+                console.error('Query execution error:', error);
+                showError(`Query execution failed: ${error.message}`);
+                clearResults();
+            }
+        }
+        
+        function displayResults(result) {
+            const resultsContainer = document.getElementById('results-table');
+            const queryInfo = document.getElementById('query-info');
+            
+            // Show query info
+            queryInfo.innerHTML = `
+                <div class="query-summary">
+                    <strong>${result.rows.toLocaleString()}</strong> rows, 
+                    <strong>${result.columns.length}</strong> columns
+                </div>
+            `;
+            
+            if (result.rows === 0) {
+                resultsContainer.innerHTML = '<p class="no-results">Query returned no results</p>';
+                return;
+            }
+            
+            // Create table
+            let html = '<table class="results-table"><thead><tr>';
+            result.columns.forEach(col => {
+                html += `<th>${escapeHtml(col)}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            
+            // Show first 1000 rows
+            const displayRows = result.data.slice(0, 1000);
+            displayRows.forEach(row => {
+                html += '<tr>';
+                result.columns.forEach(col => {
+                    const value = row[col];
+                    html += `<td>${escapeHtml(String(value ?? ''))}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            if (result.rows > 1000) {
+                html += `<p class="display-note">Showing first 1,000 rows of ${result.rows.toLocaleString()} total rows. Use LIMIT in your query or export for full results.</p>`;
+            }
+            
+            resultsContainer.innerHTML = html;
+            
+            // Store current query for export
+            window.currentQuery = result.query;
+        }
+        
+        function clearResults() {
+            document.getElementById('results-table').innerHTML = '';
+            document.getElementById('query-info').innerHTML = '';
+            window.currentQuery = null;
+        }
+        
+        async function exportToCSV() {
+            if (!window.currentQuery) {
+                showError('No query results to export');
+                return;
+            }
+            
+            try {
+                const resultRaw = window.csv_tools.export_to_csv(window.currentQuery);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    downloadFile(result.content, 'query_results.csv', 'text/csv');
+                    showSuccess(`Exported ${result.rows} rows to CSV`);
+                } else {
+                    showError(`Export failed: ${result.error}`);
+                }
+            } catch (error) {
+                showError(`Export failed: ${error.message}`);
+            }
+        }
+        
+        
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        function loadExampleQuery() {
+            const select = document.getElementById('example-queries');
+            const query = select.value;
+            if (query) {
+                window.sqlEditor.setValue(query);
+                select.value = '';
+            }
+        }
+        
+        async function toggleHeaders(tableName, hasHeaders) {
+            try {
+                const tableInfoRaw = window.csv_tools.get_table_info();
+                const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfo;
+                const info = tableInfo.tables[tableName];
+                
+                if (!info) {
+                    showError('Table not found');
+                    return;
+                }
+                
+                // Get the stored file content
+                const fileContent = window.fileContents.get(info.filename);
+                if (!fileContent) {
+                    showError('Original file content not available. Please re-upload the file.');
+                    return;
+                }
+                
+                showInfo(`Reloading ${info.filename} with ${hasHeaders ? 'headers' : 'no headers'}...`);
+                
+                // Reload the table with new header setting
+                const resultRaw = window.csv_tools.reload_table_with_headers(tableName, fileContent, hasHeaders);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    updateFileList();
+                    updateSQLEditorWithTables();
+                    showSuccess(`Reloaded ${info.filename} ${hasHeaders ? 'with' : 'without'} headers`);
+                } else {
+                    showError(`Failed to reload table: ${result.error}`);
+                    // Revert checkbox on failure
+                    const checkbox = document.getElementById(`header-${tableName}`);
+                    if (checkbox) {
+                        checkbox.checked = !hasHeaders;
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Header toggle error:', error);
+                showError(`Error toggling headers: ${error.message}`);
+                // Revert checkbox on failure
+                const checkbox = document.getElementById(`header-${tableName}`);
+                if (checkbox) {
+                    checkbox.checked = !hasHeaders;
+                }
+            }
+        }
+        
+        async function switchSheet(tableName, sheetName) {
+            try {
+                showInfo(`Switching to sheet: ${sheetName}...`);
+                
+                const resultRaw = window.csv_tools.switch_excel_sheet(tableName, sheetName);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    updateFileList();
+                    updateSQLEditorWithTables();
+                    showSuccess(`Switched to sheet "${sheetName}" (${result.rows} rows, ${result.columns.length} columns)`);
+                } else {
+                    showError(`Failed to switch sheet: ${result.error}`);
+                }
+                
+            } catch (error) {
+                console.error('Sheet switching error:', error);
+                showError(`Error switching sheet: ${error.message}`);
+            }
+        }
+        
+        async function loadAdditionalSheet(baseTableName, sheetName) {
+            if (!sheetName) return; // User selected "Choose sheet..." option
+            
+            try {
+                showInfo(`Loading additional sheet: ${sheetName}...`);
+                
+                const resultRaw = window.csv_tools.load_additional_sheet(baseTableName, sheetName);
+                const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+                
+                if (result.success) {
+                    updateFileList();
+                    updateSQLEditorWithTables();
+                    showSuccess(`Successfully loaded sheet "${sheetName}" as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns)`);
+                } else {
+                    if (result.existing_table) {
+                        showError(`Sheet "${sheetName}" is already loaded as ${result.existing_table}`);
+                    } else {
+                        showError(`Failed to load sheet: ${result.error}`);
+                    }
+                }
+                
+                // Reset the dropdown
+                const dropdown = document.getElementById(`additional-sheet-${baseTableName}`);
+                if (dropdown) {
+                    dropdown.value = '';
+                }
+                
+            } catch (error) {
+                console.error('Additional sheet loading error:', error);
+                showError(`Error loading additional sheet: ${error.message}`);
+                
+                // Reset the dropdown
+                const dropdown = document.getElementById(`additional-sheet-${baseTableName}`);
+                if (dropdown) {
+                    dropdown.value = '';
+                }
+            }
+        }
+        
+        function removeTable(tableName) {
+            const resultRaw = window.csv_tools.drop_table(tableName);
+            const result = resultRaw.toJs ? resultRaw.toJs() : resultRaw;
+            if (result.success) {
+                // Also remove stored file content
+                const tableInfoRaw = window.csv_tools.get_table_info();
+                const tableInfo = tableInfoRaw.toJs ? tableInfoRaw.toJs() : tableInfoRaw;
+                const info = tableInfo.tables[tableName];
+                if (info) {
+                    window.fileContents.delete(info.filename);
+                }
+                
+                updateFileList();
+                showInfo(`Removed table ${tableName}`);
+            } else {
+                showError(`Failed to remove table: ${result.error}`);
+            }
+        }
+        
+        // Utility functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showError(message) {
+            showNotification(message, 'error');
+        }
+        
+        function showSuccess(message) {
+            showNotification(message, 'success');
+        }
+        
+        function showInfo(message) {
+            showNotification(message, 'info');
+        }
+        
+        function showNotification(message, type = 'info') {
+            // Remove existing notifications of the same type
+            const existing = document.querySelectorAll(`.notification.${type}`);
+            existing.forEach(el => el.remove());
+            
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Auto-remove
+            const timeout = type === 'error' ? 8000 : type === 'success' ? 4000 : 6000;
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, timeout);
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initializePyScript);
+    </script>
 </body>
 </html>
