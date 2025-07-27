@@ -190,7 +190,7 @@ wb goto file://{{justfile_directory()}}/index.html
 wb eval 'console.log("Testing wb commands")'
 
 # Test file upload
-wb file-upload "input[type='file']" "{{justfile_directory()}}/sample_data.csv"
+wb file-upload "input[type='file']" "{{justfile_directory()}}/demo/sample_data.csv"
 ```
 
 ## 📝 Best Practices

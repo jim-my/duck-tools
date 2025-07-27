@@ -19,7 +19,7 @@ screenshots:
 	sleep 1
 	wb screenshot {{justfile_directory()}}/screenshots/demo-1-empty-app.png
 	@echo "📁 Step 2: Upload first file (products)"
-	wb file-upload "input[type='file']" "{{justfile_directory()}}/sample_data.csv"
+	wb file-upload "input[type='file']" "{{justfile_directory()}}/demo/sample_data.csv"
 	sleep 3
 	wb scroll up 1000
 	sleep 1
