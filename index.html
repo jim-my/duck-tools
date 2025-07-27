@@ -1151,9 +1151,16 @@ window.csv_tools = csv_tools
         }
         
         function initializeUI() {
-            // Hide loading
-            document.getElementById('loading-status').classList.add('hidden');
-            document.querySelector('.loading-progress').classList.add('hidden');
+            // Hide loading with null checks
+            const loadingStatus = document.getElementById('loading-status');
+            if (loadingStatus) {
+                loadingStatus.classList.add('hidden');
+            }
+            
+            const loadingProgress = document.querySelector('.loading-progress');
+            if (loadingProgress) {
+                loadingProgress.classList.add('hidden');
+            }
             
             // Initialize SQL editor
             initializeSQLEditor();
