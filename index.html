@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSV/Excel Transformation tools - Join files using SQL directly</title>
+    <title>Duck Tools - Private SQL Analytics for CSV/Excel Files</title>
     
     <!-- CodeMirror for SQL editing -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
@@ -18,27 +18,39 @@
 <body>
     <div id="app">
         <header>
-            <h1>Join CSV/Excel files like SQL Tables</h1>
-            <p>Upload CSV/Excel files and query with full SQL - DuckDB-powered</p>
-            <div id="loading-status">Initializing Pyodide environment...</div>
+            <h1>🦆 Duck Tools</h1>
+            <h2>Join CSV/Excel Files Instantly - 100% Private</h2>
+            <p><strong>Your data never leaves your computer.</strong> Drag files, write SQL, get insights - all offline with enterprise-level analytics.</p>
+            <div class="trust-indicators">
+                <span class="indicator">🔒 No Upload</span>
+                <span class="indicator">🌐 Works Offline</span>
+                <span class="indicator">⚡ Instant Results</span>
+            </div>
+            <div id="loading-status">Preparing your private analytics environment...</div>
             <div class="loading-progress">
                 <div class="loading-bar" id="loading-bar"></div>
             </div>
         </header>
         
         <div id="upload-section" class="hidden">
-            <h2>Upload Files</h2>
+            <h2><span class="step-number">1</span> Drop Your Files (Stay Local)</h2>
             <div id="dropzone" class="dropzone">
                 <div class="dz-message">
-                    <strong>Drop CSV/Excel files here or click to upload</strong>
-                    <span class="note">(Supports .csv, .xlsx files - Max size: 50MB)</span>
+                    <div class="dropzone-icon">📁</div>
+                    <strong>Drop CSV/Excel files here or click to browse</strong>
+                    <span class="note">Files processed locally on your computer - never uploaded</span>
+                    <div class="supported-formats">
+                        <span class="format">.csv</span>
+                        <span class="format">.xlsx</span>
+                        <span class="format">Up to 50MB</span>
+                    </div>
                 </div>
             </div>
             <div id="file-list"></div>
         </div>
         
         <div id="query-section" class="hidden">
-            <h2>SQL Query</h2>
+            <h2><span class="step-number">2</span> Write SQL Queries</h2>
             <div id="sql-editor"></div>
             <div class="query-controls">
                 <button id="run-query">Run Query</button>
@@ -56,7 +68,7 @@
         </div>
         
         <div id="results-section" class="hidden">
-            <h2>Results</h2>
+            <h2><span class="step-number">3</span> Get Instant Results</h2>
             <div class="export-controls">
                 <button id="export-csv">Export as CSV</button>
             </div>
