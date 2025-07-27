@@ -9,32 +9,35 @@ test:
 screenshots:
 	@echo "🔄 Generating fresh screenshots..."
 	@mkdir -p {{justfile_directory()}}/screenshots
+	@echo "🖥️  Setting optimal window size for screenshots..."
+	wb window-resize 1400 900
+	sleep 1
 	@echo "📱 Step 1: Empty app"
 	wb goto file://{{justfile_directory()}}/index.html
 	sleep 8
-	wb screenshot {{justfile_directory()}}/screenshots/demo-1-empty-app.png --full-page
+	wb screenshot {{justfile_directory()}}/screenshots/demo-1-empty-app.png --element "#app"
 	@echo "📁 Step 2: Upload first file (products)"
 	wb file-upload "input[type='file']" "{{justfile_directory()}}/sample_data.csv"
 	sleep 3
-	wb screenshot {{justfile_directory()}}/screenshots/demo-2-first-file.png --full-page
+	wb screenshot {{justfile_directory()}}/screenshots/demo-2-first-file.png --element "#app"
 	@echo "📁 Step 3: Upload second file (sales data)"
 	wb file-upload "input[type='file']" "{{justfile_directory()}}/demo/sales_data.csv"
 	sleep 3
-	wb screenshot {{justfile_directory()}}/screenshots/demo-3-two-files.png --full-page
+	wb screenshot {{justfile_directory()}}/screenshots/demo-3-two-files.png --element "#app"
 	@echo "🔍 Step 4: Write JOIN query"
 	wb click ".CodeMirror"
 	wb combo "Control+a"
 	wb eval 'document.querySelector(".CodeMirror").CodeMirror.setValue("-- 🚀 JOIN TWO FILES INSTANTLY!\n-- Combine product info (t1) with sales data (t2)\n\nSELECT \n    p.name as product_name,\n    p.category,\n    p.value as price,\n    s.quarter,\n    s.sales as sales_amount,\n    s.region,\n    ROUND(s.sales / p.value, 0) as units_sold\nFROM t1 p\nJOIN t2 s ON p.id = s.product_id\nORDER BY s.sales DESC;")'
 	sleep 1
-	wb screenshot {{justfile_directory()}}/screenshots/demo-4-join-query.png --full-page
+	wb screenshot {{justfile_directory()}}/screenshots/demo-4-join-query.png --element "#app"
 	@echo "⚡ Step 5: Execute JOIN and show results"
 	wb click "#run-query"
 	sleep 4
-	wb screenshot {{justfile_directory()}}/screenshots/demo-5-join-results.png --full-page
+	wb screenshot {{justfile_directory()}}/screenshots/demo-5-join-results.png --element "#app"
 	@echo "📸 Legacy screenshots for compatibility"
-	wb screenshot {{justfile_directory()}}/screenshots/app-ready.png --full-page
-	wb screenshot {{justfile_directory()}}/screenshots/file-uploaded.png --full-page
-	wb screenshot {{justfile_directory()}}/screenshots/query-results.png --full-page
+	wb screenshot {{justfile_directory()}}/screenshots/app-ready.png --element "#app"
+	wb screenshot {{justfile_directory()}}/screenshots/file-uploaded.png --element "#app"
+	wb screenshot {{justfile_directory()}}/screenshots/query-results.png --element "#app"
 	@echo "✅ All screenshots updated successfully!"
 	@echo "📸 Generated demo screenshots:"
 	@ls -la {{justfile_directory()}}/screenshots/demo-*.png

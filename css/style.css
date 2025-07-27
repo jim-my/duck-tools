@@ -19,6 +19,29 @@ body {
     margin: 0 auto;
 }
 
+/* Screenshot-optimized mode - tighter layout for better screenshot density */
+@media screen and (min-width: 1300px) {
+    body {
+        padding: 20px;
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    }
+    
+    #app {
+        max-width: 95%;
+        margin: 0 auto;
+    }
+    
+    header {
+        margin-bottom: 30px;
+        padding: 20px;
+    }
+    
+    .workflow-step {
+        margin-bottom: 20px;
+        padding: 25px;
+    }
+}
+
 header {
     text-align: center;
     margin-bottom: 40px;
