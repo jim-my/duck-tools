@@ -26,9 +26,18 @@
                 <span class="indicator">🌐 Works Offline</span>
                 <span class="indicator">⚡ Instant Results</span>
             </div>
-            <div id="loading-status">Preparing your private analytics environment...</div>
-            <div class="loading-progress">
-                <div class="loading-bar" id="loading-bar"></div>
+            <div id="loading-status" class="loading-state">
+                <div class="loading-icon">🦆</div>
+                <h3>Preparing Your Private Analytics Environment</h3>
+                <p>Loading DuckDB engine... <span id="loading-progress">0%</span></p>
+                <div class="loading-benefits">
+                    <div class="benefit">✓ No data uploaded to servers</div>
+                    <div class="benefit">✓ Full SQL engine in your browser</div>
+                    <div class="benefit">✓ Enterprise-grade performance</div>
+                </div>
+                <div class="loading-progress">
+                    <div class="loading-bar" id="loading-bar"></div>
+                </div>
             </div>
         </header>
         
@@ -50,18 +59,23 @@
         </div>
         
         <div id="query-section" class="hidden">
-            <h2><span class="step-number">2</span> Write SQL Queries</h2>
+            <div class="sql-header">
+                <h2><span class="step-number">2</span> Write SQL Queries</h2>
+                <div class="sql-help">
+                    <span class="help-text">Tables: t1, t2, t3... • Full SQL support including JOINs</span>
+                </div>
+            </div>
             <div id="sql-editor"></div>
             <div class="query-controls">
-                <button id="run-query">Run Query</button>
-                <span class="shortcut-hint">Ctrl+Enter to run</span>
+                <button id="run-query" class="run-btn primary">Run Query</button>
+                <span class="shortcut-hint">Ctrl+Enter</span>
                 <div class="query-examples">
                     <select id="example-queries">
-                        <option value="">Load example query...</option>
+                        <option value="">📋 Load example query...</option>
                         <option value="SELECT * FROM t1 LIMIT 10;">Basic SELECT</option>
                         <option value="SELECT column, COUNT(*) as count FROM t1 GROUP BY column ORDER BY count DESC;">Group By Count</option>
-                        <option value="SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;">Inner Join</option>
-                        <option value="SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY value DESC) as rank FROM t1;">Window Function</option>
+                        <option value="SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;">🔗 Inner Join</option>
+                        <option value="SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY value DESC) as rank FROM t1;">📊 Window Function</option>
                     </select>
                 </div>
             </div>
