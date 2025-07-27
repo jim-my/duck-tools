@@ -41,8 +41,9 @@
             </div>
         </header>
         
-        <div id="upload-section" class="hidden">
+        <div id="upload-section" class="workflow-step active" data-step="1">
             <h2><span class="step-number">1</span> Drop Your Files (Stay Local)</h2>
+            <p class="step-description">CSV, Excel - any size. Processed instantly on your computer.</p>
             <div id="dropzone" class="dropzone">
                 <div class="dz-message">
                     <div class="dropzone-icon">📁</div>
@@ -58,9 +59,10 @@
             <div id="file-list"></div>
         </div>
         
-        <div id="query-section" class="hidden">
+        <div id="query-section" class="workflow-step disabled" data-step="2">
             <div class="sql-header">
                 <h2><span class="step-number">2</span> Write SQL Queries</h2>
+                <p class="step-description">Full SQL power - JOINs, window functions, everything you need.</p>
                 <div class="sql-help">
                     <span class="help-text">Tables: t1, t2, t3... • Full SQL support including JOINs</span>
                 </div>
@@ -81,8 +83,9 @@
             </div>
         </div>
         
-        <div id="results-section" class="hidden">
+        <div id="results-section" class="workflow-step disabled" data-step="3">
             <h2><span class="step-number">3</span> Get Instant Results</h2>
+            <p class="step-description">Instant analytics. Export when ready.</p>
             <div class="export-controls">
                 <button id="export-csv">Export as CSV</button>
             </div>
@@ -92,6 +95,52 @@
         
         <div id="error-container"></div>
     </div>
+    
+    <!-- Workflow Management -->
+    <script>
+        // Progressive workflow management
+        window.workflowManager = {
+            currentStep: 1,
+            
+            enableStep: function(stepNumber) {
+                const step = document.querySelector(`[data-step="${stepNumber}"]`);
+                if (step) {
+                    step.classList.remove('disabled');
+                    step.classList.add('active');
+                }
+            },
+            
+            completeStep: function(stepNumber) {
+                const step = document.querySelector(`[data-step="${stepNumber}"]`);
+                if (step) {
+                    step.classList.remove('active');
+                    step.classList.add('completed');
+                    
+                    // Enable next step
+                    if (stepNumber < 3) {
+                        this.enableStep(stepNumber + 1);
+                    }
+                }
+            },
+            
+            init: function() {
+                // Listen for file uploads to enable step 2
+                window.addEventListener('fileLoaded', () => {
+                    this.completeStep(1);
+                });
+                
+                // Listen for query execution to enable step 3
+                window.addEventListener('queryExecuted', () => {
+                    this.completeStep(2);
+                });
+            }
+        };
+        
+        // Initialize workflow when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            window.workflowManager.init();
+        });
+    </script>
     
     <!-- DuckDB Python Module -->
     <script type="py" config='{"packages":["duckdb", "pandas", "openpyxl"]}' id="python-code">
@@ -1102,12 +1151,9 @@ window.csv_tools = csv_tools
         }
         
         function initializeUI() {
-            // Hide loading and show main sections
+            // Hide loading
             document.getElementById('loading-status').classList.add('hidden');
             document.querySelector('.loading-progress').classList.add('hidden');
-            document.getElementById('upload-section').classList.remove('hidden');
-            document.getElementById('query-section').classList.remove('hidden');
-            document.getElementById('results-section').classList.remove('hidden');
             
             // Initialize SQL editor
             initializeSQLEditor();
@@ -1236,6 +1282,8 @@ window.csv_tools = csv_tools
                             showSuccess(`Loaded Excel file ${file.name} as ${result.table_name} (${result.rows} rows, ${result.columns.length} columns)`);
                         }
                         updateSQLEditorWithTables();
+                        // Fire fileLoaded event for workflow progression
+                        window.dispatchEvent(new CustomEvent('fileLoaded'));
                     } else {
                         console.error('Excel loading failed:', result.error);
                         showError(`Failed to load ${file.name}: ${result.error}`);
@@ -1253,6 +1301,8 @@ window.csv_tools = csv_tools
                     if (result.success) {
                         showSuccess(`Loaded ${file.name} as ${result.table_name} (${result.rows} rows)`);
                         updateSQLEditorWithTables();
+                        // Fire fileLoaded event for workflow progression
+                        window.dispatchEvent(new CustomEvent('fileLoaded'));
                     } else {
                         showError(`Failed to load ${file.name}: ${result.error}`);
                     }
@@ -1412,6 +1462,8 @@ window.csv_tools = csv_tools
                 if (jsResult.success) {
                     displayResults(jsResult);
                     showSuccess(`Query executed: ${jsResult.rows} rows returned`);
+                    // Fire queryExecuted event for workflow progression
+                    window.dispatchEvent(new CustomEvent('queryExecuted'));
                 } else {
                     showError(`Query failed: ${jsResult.error}`);
                     clearResults();
