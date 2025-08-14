@@ -3,10 +3,13 @@
 > **🔒 100% Private • 🌐 Works Offline • 💪 Join Files Instantly**  
 > Powerful client-side data analysis tool that lets you join, query, and analyze CSV/Excel files using full SQL syntax - **your data never leaves your computer!**
 
+[![Live Site](https://img.shields.io/badge/Live%20Site-online-brightgreen.svg)](https://jim-my.github.io/duck-tools/)
 [![Offline](https://img.shields.io/badge/Works-Offline-green.svg)](#)
 [![No Upload](https://img.shields.io/badge/No%20Data%20Upload-blue.svg)](#)
 [![Privacy First](https://img.shields.io/badge/100%25%20Private-orange.svg)](#)
 [![No Server](https://img.shields.io/badge/No%20Server-red.svg)](#)
+
+**➡️ Live Site: [https://jim-my.github.io/duck-tools/](https://jim-my.github.io/duck-tools/)**
 
 ![Duck Tools Interface](screenshots/app-ready.png)
 
@@ -245,7 +248,7 @@ const customExamples = [
 | **Data Breach Risk** | ❌ Zero | ⚠️ High | ⚠️ Medium |
 | **Compliance Issues** | ❌ None | ⚠️ Many | ⚠️ Some |
 | **Setup Time** | ⚡ 0 seconds | ⏱️ Hours | ⏱️ Days |
-| **Cost** | 💰 Free | 💰💰 $$/month | 💰💰💰 $$$$ |
+| **Cost** | 💰 Free | 💰💰 $/month | 💰💰💰 $$ |
 | **SQL Features** | ✅ Modern | ⚠️ Limited | ✅ Full |
 | **File Joining** | ✅ Instant | ✅ Yes | ✅ Yes |
 
@@ -361,3 +364,4 @@ MIT License - feel free to use this in your own projects!
 **Made with ❤️ for data analysts who value privacy and performance**
 
 *No servers, no tracking, no limits - just pure SQL power in your browser!*
+
